@@ -386,3 +386,65 @@
 .lego-pal-btn:hover {
   filter: brightness(1.1);
 }
+
+@media (max-width: 768px) {
+  .lego-toolbar {
+    padding: 6px 6px 5px;
+    gap: 3px;
+  }
+
+  .lego-toolbar .separator {
+    display: none;
+  }
+
+  .lego-btn {
+    padding: 4px 7px;
+    font-size: 8px;
+    margin-top: 5px;
+    --stud-size: 9px;
+    --stud-offset: -5px;
+  }
+
+  .lego-btn::before {
+    width: 9px;
+    height: 9px;
+  }
+
+  .lego-paint-btn {
+    padding: 5px 0;
+    font-size: 10px;
+  }
+
+  .lego-pal-btn {
+    padding: 10px 1px 3px;
+  }
+
+  .lego-grid-cell .stud {
+    width: 7px;
+    height: 7px;
+    top: 2px;
+    left: 2px;
+  }
+}
+
+@media (max-width: 480px) {
+  .lego-btn {
+    padding: 3px 5px;
+    font-size: 7px;
+    margin-top: 4px;
+    --stud-size: 7px;
+    --stud-offset: -4px;
+  }
+
+  .lego-btn::before {
+    width: 7px;
+    height: 7px;
+  }
+
+  .lego-grid-cell .stud {
+    width: 5px;
+    height: 5px;
+    top: 1px;
+    left: 1px;
+  }
+}

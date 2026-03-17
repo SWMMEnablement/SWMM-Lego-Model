@@ -14,7 +14,8 @@ import { initSwmmWasm, runSwmmWasm, isSwmmReady } from "../lib/swmmWasm.js";
 import { parseRpt } from "../lib/parseRpt.js";
 import "./LegoToolbar.css";
 
-function GridCell({ element, isHov, hasErr, hasWarn, hasOverride, flowIntensity, depthFrac, row, col }) {
+function GridCell({ element, isHov, hasErr, hasWarn, hasOverride, flowIntensity, depthFrac, row, col, cellSize: cs }) {
+  const cz = cs || CELL;
   const el = element ? EL[element] : null;
   const base = el ? el.clr : "transparent";
   const GRID = getGrid();
@@ -55,10 +56,10 @@ function GridCell({ element, isHov, hasErr, hasWarn, hasOverride, flowIntensity,
 
   return (
     <div title={tip} className={`lego-grid-cell${el ? " filled" : ""}`} style={{
-      width: CELL, height: CELL,
+      width: cz, height: cz,
       background: el ? base : "transparent",
       border: borderStyle,
-      fontSize: el ? 13 : 0,
+      fontSize: el ? Math.max(8, Math.round(cz * 0.4)) : 0,
       ...(errShadow ? { boxShadow: errShadow } : {}),
       ...(extraShadow && !hasErr && !hasWarn && el ? { boxShadow: `inset 3px 3px 0 0 rgba(255,255,255,0.25), inset -3px -4px 0 0 rgba(0,0,0,0.30), 2px 3px 0 0 rgba(0,0,0,0.40)${extraShadow}` } : {}),
     }}>
@@ -95,7 +96,19 @@ function PalBtn({ type, sel, onClick }) {
   );
 }
 
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= breakpoint);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth <= breakpoint);
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 export default function SWMM5LegoBuilder() {
+  const isMobile = useIsMobile();
+  const cellSize = isMobile ? Math.max(14, Math.floor((window.innerWidth - 20) / 20)) : CELL;
   const [gridSize, setGridSize] = useState(20);
   const [grid, setGrid] = useState(() => { setGridGlobal(20); return emptyGrid(20); });
   const [sel, setSel] = useState("grass");
@@ -198,26 +211,46 @@ export default function SWMM5LegoBuilder() {
     const rect = gridRef.current.getBoundingClientRect();
     const x = touch.clientX - rect.left + gridRef.current.scrollLeft;
     const y = touch.clientY - rect.top + gridRef.current.scrollTop;
-    const c = Math.floor(x / CELL);
-    const r = Math.floor(y / CELL);
+    const c = Math.floor(x / cellSize);
+    const r = Math.floor(y / cellSize);
     if (r >= 0 && r < gridSize && c >= 0 && c < gridSize) return { r, c };
     return null;
-  }, [gridSize]);
+  }, [gridSize, cellSize]);
+
+  const longPressRef = useRef(null);
+  const longPressMovedRef = useRef(false);
 
   const handleTouchStart = useCallback((e) => {
     if (e.touches.length !== 1) return;
     const cell = touchToCell(e.touches[0]);
-    if (cell) { save(); place(cell.r, cell.c); setInspCell(cell); setPainting(true); }
-  }, [touchToCell, save, place]);
+    longPressMovedRef.current = false;
+    if (cell) {
+      const touch = e.touches[0];
+      longPressRef.current = setTimeout(() => {
+        const elKey = grid[cell.r]?.[cell.c];
+        if (elKey && EL[elKey] && !longPressMovedRef.current) {
+          setCtxMenu({ r: cell.r, c: cell.c, x: touch.clientX, y: touch.clientY });
+          setPainting(false);
+        }
+        longPressRef.current = null;
+      }, 500);
+      save(); place(cell.r, cell.c); setInspCell(cell); setPainting(true);
+    }
+  }, [touchToCell, save, place, grid]);
 
   const handleTouchMove = useCallback((e) => {
     e.preventDefault();
+    longPressMovedRef.current = true;
+    if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null; }
     if (!painting || e.touches.length !== 1) return;
     const cell = touchToCell(e.touches[0]);
     if (cell) place(cell.r, cell.c);
   }, [painting, touchToCell, place]);
 
-  const handleTouchEnd = useCallback(() => { setPainting(false); }, []);
+  const handleTouchEnd = useCallback(() => {
+    if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null; }
+    setPainting(false);
+  }, []);
 
   const resizeGrid = (newSize) => {
     save();
@@ -523,13 +556,13 @@ export default function SWMM5LegoBuilder() {
 
       <div style={{ textAlign: "center", marginBottom: 8, position: "relative" }}>
         <h1 style={{
-          fontSize: 28, fontWeight: 900, margin: 0,
+          fontSize: isMobile ? 18 : 28, fontWeight: 900, margin: 0,
           color: "#F2C717",
           textShadow: "3px 3px 0 rgba(0,0,0,0.5), -1px -1px 0 rgba(0,0,0,0.3)",
           letterSpacing: 1,
           fontFamily: "'Fredoka', 'Nunito', sans-serif",
         }}>🧱 SWMM5 LEGO BUILDER</h1>
-        <p style={{ fontSize: 11, color: "#9BA19D", margin: "2px 0 0", fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
+        <p style={{ fontSize: isMobile ? 9 : 11, color: "#9BA19D", margin: "2px 0 0", fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
           Build • Validate • Simulate • Export
         </p>
         <button onClick={() => { setShowTutorial(true); setTutStep(0); }} title="Show tutorial" style={{
@@ -541,9 +574,9 @@ export default function SWMM5LegoBuilder() {
         }}>?</button>
       </div>
 
-      <div style={{ display: "flex", gap: 10, width: "100%", maxWidth: 1300, flexWrap: "wrap", justifyContent: "center" }}>
+      <div style={{ display: "flex", gap: isMobile ? 6 : 10, width: "100%", maxWidth: 1300, flexWrap: "wrap", justifyContent: "center", flexDirection: isMobile ? "column" : "row", padding: isMobile ? "0 4px" : 0 }}>
 
-        <div style={{ width: 210, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ width: isMobile ? "100%" : 210, flexShrink: 0, display: "flex", flexDirection: isMobile ? "row" : "column", gap: isMobile ? 4 : 8, flexWrap: isMobile ? "wrap" : "nowrap" }}>
           <div style={{ display: "flex", gap: 4 }}>
             <button onClick={() => setErasing(false)}
               className={`lego-paint-btn ${!erasing ? "paint-mode paint-active" : "inactive"}`}
@@ -556,7 +589,7 @@ export default function SWMM5LegoBuilder() {
           {CATS.map(cat => (
             <div key={cat.k}>
               <div style={{ fontSize: 10, fontWeight: 900, color: "#9BA19D", letterSpacing: 2, marginBottom: 4, textTransform: "uppercase", fontFamily: "'Fredoka', sans-serif" }}>{cat.l}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 3 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(auto-fill, minmax(42px, 1fr))" : "1fr 1fr 1fr 1fr", gap: 3 }}>
                 {cat.items.map(t => <PalBtn key={t} type={t} sel={erasing ? null : sel} onClick={t2 => { setSel(t2); setErasing(false); }} />)}
               </div>
             </div>
@@ -565,17 +598,17 @@ export default function SWMM5LegoBuilder() {
           {!erasing && (() => {
             const el = EL[sel];
             const Row = ({label, value, color}) => (
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px dotted #ccc", fontFamily: "'Fredoka', sans-serif", fontSize: 11 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px dotted #ccc", fontFamily: "'Fredoka', sans-serif", fontSize: isMobile ? 10 : 11 }}>
                 <span style={{ color: "#1B2A34" }}>{label}</span>
                 <span style={{ color: color || "#D01012", fontWeight: 700 }}>{value}</span>
               </div>
             );
             return (
               <div style={{
-                background: "#F4F4F4", borderRadius: 4, padding: 12, transition: "all 0.2s",
+                background: "#F4F4F4", borderRadius: 4, padding: isMobile ? 8 : 12, transition: "all 0.2s",
                 border: "3px solid #6C6E68",
                 boxShadow: "4px 4px 0 rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.8)",
-                color: "#1B2A34",
+                color: "#1B2A34", width: isMobile ? "100%" : undefined, boxSizing: "border-box",
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                   <span style={{ fontSize: 24 }}>{el.e}</span>
@@ -638,6 +671,7 @@ export default function SWMM5LegoBuilder() {
             );
           })()}
 
+          {!isMobile && <>
           <div style={{
             background: "#F4F4F4", borderRadius: 4, padding: 8,
             border: "3px solid #6C6E68", color: "#1B2A34",
@@ -679,9 +713,10 @@ export default function SWMM5LegoBuilder() {
               ))}
             </div>
           </div>
+          </>}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, flexGrow: 1, maxWidth: 780 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 4 : 8, flexGrow: 1, maxWidth: isMobile ? "100%" : 780, width: isMobile ? "100%" : undefined }}>
           <div className="lego-toolbar">
             <div style={{ display: "flex", gap: 5, justifyContent: "center", flexWrap: "wrap", alignItems: "center", width: "100%" }}>
               {[
@@ -764,9 +799,9 @@ export default function SWMM5LegoBuilder() {
 
             <div ref={gridRef} style={{
               overflowX: "auto",
-              backgroundImage: "radial-gradient(circle at center, rgba(255,255,255,0.18) 3px, transparent 3px)",
-              backgroundSize: `${CELL}px ${CELL}px`,
-              backgroundPosition: `${CELL/2}px ${CELL/2}px`,
+              backgroundImage: `radial-gradient(circle at center, rgba(255,255,255,0.18) ${Math.max(2, cellSize * 0.09)}px, transparent ${Math.max(2, cellSize * 0.09)}px)`,
+              backgroundSize: `${cellSize}px ${cellSize}px`,
+              backgroundPosition: `${cellSize/2}px ${cellSize/2}px`,
               borderRadius: 2,
               touchAction: "none",
             }}
@@ -796,6 +831,7 @@ export default function SWMM5LegoBuilder() {
                         flowIntensity={flowState[`${r}-${c}`]?.flow || 0}
                         depthFrac={flowState[`${r}-${c}`]?.depth || 0}
                         row={r} col={c}
+                        cellSize={cellSize}
                       />
                     </div>
                   ))}
@@ -829,7 +865,7 @@ export default function SWMM5LegoBuilder() {
                 background: "#F4F4F4", borderRadius: 4, padding: 10,
                 border: "3px solid #6C6E68",
                 boxShadow: "4px 4px 0 rgba(0,0,0,0.4)",
-                width: GRID * CELL, boxSizing: "border-box", color: "#1B2A34",
+                width: isMobile ? "100%" : GRID * CELL, boxSizing: "border-box", color: "#1B2A34",
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1626,7 +1662,7 @@ export default function SWMM5LegoBuilder() {
           })()}
         </div>
 
-        <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ width: isMobile ? "100%" : 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{
             background: "#F4F4F4", borderRadius: 4, padding: 8,
             border: "3px solid #6C6E68", color: "#1B2A34",
@@ -1836,7 +1872,7 @@ export default function SWMM5LegoBuilder() {
         if (fields.length === 0) { setCtxMenu(null); return null; }
         return (
           <div onClick={e => e.stopPropagation()} style={{
-            position: "fixed", left: Math.min(x, window.innerWidth - 260), top: Math.min(y, window.innerHeight - 400),
+            position: "fixed", left: isMobile ? 10 : Math.min(x, window.innerWidth - 260), top: isMobile ? 60 : Math.min(y, window.innerHeight - 400), right: isMobile ? 10 : "auto",
             background: "#F4F4F4", border: "3px solid #F2C717", borderRadius: 4, padding: 12, zIndex: 10000,
             boxShadow: "6px 6px 0 rgba(0,0,0,0.4)", minWidth: 220, fontFamily: "'Fredoka', sans-serif",
           }}>
@@ -1887,8 +1923,8 @@ export default function SWMM5LegoBuilder() {
       {showSavePanel && (
         <div style={{
           position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
-          background: "#F4F4F4", border: "4px solid #F2C717", borderRadius: 6, padding: 16, zIndex: 10000,
-          boxShadow: "8px 8px 0 rgba(0,0,0,0.4)", minWidth: 340, fontFamily: "'Fredoka', sans-serif",
+          background: "#F4F4F4", border: "4px solid #F2C717", borderRadius: 6, padding: isMobile ? 12 : 16, zIndex: 10000,
+          boxShadow: "8px 8px 0 rgba(0,0,0,0.4)", minWidth: isMobile ? "auto" : 340, width: isMobile ? "calc(100vw - 32px)" : "auto", maxWidth: isMobile ? "none" : "none", fontFamily: "'Fredoka', sans-serif",
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <span style={{ fontSize: 16, fontWeight: 900, color: "#D01012" }}>Save / Load</span>

@@ -56,7 +56,8 @@ Interactive browser-based stormwater management model builder. Features:
 - Time-series CSV export for all result tabs
 - Save/Load to localStorage (auto-save + 5 named slots)
 - Keyboard shortcuts: Ctrl+Z (undo), Space (toggle paint/erase), Del (erase mode), R (run), Esc (close panels), 1-9 (select surface), Shift+1-5 (select node), Q/W/E (pipe/channel/pump)
-- Mobile touch support: single-finger paint/drag on grid with touch-action:none for smooth drawing
+- Mobile touch support: single-finger paint/drag on grid with touch-action:none for smooth drawing; long-press (500ms) to open property editor on placed cells
+- Fully responsive layout: three-column desktop (left palette 210px, center grid, right sidebar 280px) stacks vertically on mobile (<768px); dynamic cell sizing scales grid to fit mobile screens; DUAL ENGINES and SHORTCUTS panels hidden on mobile; toolbar buttons, studs, and palette scale down via CSS media queries
 - No backend required — entirely frontend
 
 **Visual Theme**: Full LEGO brick aesthetic
