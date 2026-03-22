@@ -36,3 +36,9 @@ id = "rR2RChPAtuO3Ok1OH1DDY"
 uri = "file://attached_assets/lego-board-green-infra.png"
 type = "image"
 title = "Green Infrastructure Model"
+
+[[outputs]]
+id = "YH6ZWh3Jj9ONKO61sK4tv"
+uri = "file://artifacts/swmm5-lego/public/docs/SWMM5_Lego_Builder_Handover.docx"
+type = "word_document"
+title = "SWMM5 LEGO Builder — Technical Handover Document"
