@@ -43,7 +43,7 @@ artifacts-monorepo/
 Interactive browser-based stormwater management model builder. Features:
 - Grid-based editor for painting surfaces (grass, roof, road, etc.), nodes (manhole, inlet, outfall), and links (pipe, channel, pump)
 - Full JavaScript SWMM5 simulation engine with SCS Curve Number infiltration, Manning's overland flow, and Manning's pipe flow
-- 49 design storms from 6 continents (US SCS Types, European, Asian, etc.)
+- 49+ design storms from 6 continents (US SCS Types, European, Asian, etc.) plus 5 continuous multi-day storms (2-day to 30-day)
 - Real-time animated simulation with flow visualization on the grid
 - Result charts (system hydrograph, subcatchment, pipe, and node results)
 - SWMM Inspector panel for live element data during simulation
@@ -61,6 +61,10 @@ Interactive browser-based stormwater management model builder. Features:
 - Keyboard shortcuts: Ctrl+Z (undo), Space (toggle paint/erase), Del (erase mode), R (run), Esc (close panels), 1-9 (select surface), Shift+1-5 (select node), Q/W/E (pipe/channel/pump)
 - Mobile touch support: single-finger paint/drag on grid with touch-action:none for smooth drawing; long-press (500ms) to open property editor on placed cells
 - Fully responsive layout: three-column desktop (left palette 210px, center grid, right sidebar 280px) stacks vertically on mobile (<768px); dynamic cell sizing scales grid to fit mobile screens; DUAL ENGINES and SHORTCUTS panels hidden on mobile; toolbar buttons, studs, and palette scale down via CSS media queries
+- Background map overlay: upload aerial photos, site plans, or GIS screenshots as a georeferenced background behind the grid with adjustable opacity
+- Water quality modeling: toggle pollutant tracking (TSS, BOD, COD, TN, TP, Zn) with SWMM5 [POLLUTANTS], [LANDUSES], [BUILDUP], [WASHOFF] sections in .INP export; land use derived from surface types
+- Continuous simulation support: 5 multi-day storms (2-day to 30-day) with evaporation and temperature parameters for extended analysis
+- Custom cell spacing: adjust grid cell dimensions (10-1000 ft) for irregular site geometry approximation; scales subcatchment areas, widths, and conduit lengths in .INP export
 - No backend required — entirely frontend
 
 **Visual Theme**: Full LEGO brick aesthetic
@@ -100,7 +104,8 @@ Interactive browser-based stormwater management model builder. Features:
 **Architecture** (modularized):
 - `src/components/SWMM5LegoBuilder.jsx` — Main React component (~1828 lines, inline styles)
 - `src/lib/elements.js` — Element definitions (EL, CATS), grid utilities, mutable GRID via getGrid()/setGrid()
-- `src/lib/storms.js` — 49 design storms with storm category definitions
+- `src/lib/storms.js` — 49+ design storms with storm category definitions (incl. 5 continuous multi-day)
+- `src/lib/pollutants.js` — Water quality module: 6 pollutants, 10 land uses, buildup/washoff parameters
 - `src/lib/hydraulics.js` — SWMM5 JS engine (buildModel, runSWMM5, Manning's equations, CN infiltration)
 - `src/lib/swmmWasm.js` — EPA SWMM5 WASM wrapper (Emscripten module loader, virtual FS I/O, ccall to swmm_run)
 - `src/lib/parseRpt.js` — SWMM5 .RPT output parser (subcatchments, nodes, links, continuity, analysis options)

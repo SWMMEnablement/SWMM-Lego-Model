@@ -149,9 +149,10 @@ export function buildModel(grid, cellProps) {
       const area_ft2 = cells.length * SPC * SPC;
       const area_ac = area_ft2 / 43560;
       const width = Math.sqrt(cells.length) * SPC;
+      const surfKeys = [...new Set(cells.map(cl => cl.type))];
 
       subcatchments.push({
-        id: `SC_${scIdx}`, cells, outlet: nearest, area_ac, area_ft2, width,
+        id: `SC_${scIdx}`, cells, outlet: nearest, area_ac, area_ft2, width, surfKeys,
         slope: sampleOv?.slope !== undefined ? sampleOv.slope : 0.5,
         pctImperv: avgI, cn: avgCN,
         nImperv: sampleOv?.nI !== undefined ? sampleOv.nI : sample.nI,

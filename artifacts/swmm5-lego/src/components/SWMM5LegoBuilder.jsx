@@ -14,6 +14,7 @@ import { DEMOS } from "../lib/demos.js";
 import { initSwmmWasm, runSwmmWasm, isSwmmReady } from "../lib/swmmWasm.js";
 import { parseRpt } from "../lib/parseRpt.js";
 import { parseOutBinary } from "../lib/parseOut.js";
+import { POLLUTANTS, DEFAULT_WQ_CONFIG } from "../lib/pollutants.js";
 import "./LegoToolbar.css";
 
 function GridCell({ element, isHov, hasErr, hasWarn, hasOverride, flowIntensity, depthFrac, row, col, cellSize: cs }) {
@@ -143,8 +144,17 @@ export default function SWMM5LegoBuilder() {
   const [wasmBinaryResults, setWasmBinaryResults] = useState(null);
   const [showRpt, setShowRpt] = useState(false);
   const [rptTab, setRptTab] = useState("summary");
+  const [bgImage, setBgImage] = useState(null);
+  const [bgOpacity, setBgOpacity] = useState(0.3);
+  const [showBgControls, setShowBgControls] = useState(false);
+  const [wqConfig, setWqConfig] = useState({ ...DEFAULT_WQ_CONFIG });
+  const [showWqPanel, setShowWqPanel] = useState(false);
+  const [cellSpacing, setCellSpacing] = useState(SPC);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [evapRate, setEvapRate] = useState(0.1);
   const animRef = useRef(null);
   const fileRef = useRef(null);
+  const bgFileRef = useRef(null);
   const autoSaveTimer = useRef(null);
   const gridRef = useRef(null);
 
@@ -377,7 +387,9 @@ export default function SWMM5LegoBuilder() {
     const v = validateModel(grid);
     setValidation(v);
     if (v.errors.length > 0) return;
-    setInpText(exportINP(grid, STORMS[stormIdx], cellProps));
+    setInpText(exportINP(grid, STORMS[stormIdx], cellProps, {
+      waterQuality: wqConfig, cellSpacing, evapRate,
+    }));
     setShowInp(true);
   };
 
@@ -388,7 +400,9 @@ export default function SWMM5LegoBuilder() {
     setWasmLoading(true);
     setWasmRpt(null); setWasmParsed(null); setWasmBinaryResults(null);
     try {
-      const inp = exportINP(grid, STORMS[stormIdx], cellProps);
+      const inp = exportINP(grid, STORMS[stormIdx], cellProps, {
+        waterQuality: wqConfig, cellSpacing, evapRate,
+      });
       const { returnCode, rpt, outBinary } = await runSwmmWasm(inp);
       setWasmRpt(rpt);
       const parsed = parseRpt(rpt);
@@ -761,8 +775,26 @@ export default function SWMM5LegoBuilder() {
                   onClick={() => resizeGrid(sz)} title={`Resize grid to ${sz}×${sz} cells`}
                 >{sz}×{sz}</button>
               ))}
+              <span className="separator" />
+              <button className="lego-btn sm" data-color={bgImage ? "green" : "white"}
+                onClick={() => setShowBgControls(s => !s)}
+                title="Background map/image overlay for georeferencing">🗺️ Map</button>
+              <button className="lego-btn sm" data-color={wqConfig.enabled ? "green" : "white"}
+                onClick={() => setShowWqPanel(s => !s)}
+                title="Water quality / pollutant modeling settings">🧪 WQ</button>
+              <button className="lego-btn sm" data-color={showAdvanced ? "blue" : "white"}
+                onClick={() => setShowAdvanced(s => !s)}
+                title="Advanced simulation settings (cell spacing, evaporation)">⚙️</button>
             </div>
             <input ref={fileRef} type="file" accept=".inp,.txt" onChange={doImport} style={{ display: "none" }} />
+            <input ref={bgFileRef} type="file" accept="image/*" onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (ev) => setBgImage(ev.target.result);
+              reader.readAsDataURL(file);
+              e.target.value = "";
+            }} style={{ display: "none" }} />
 
             {showDemos && (
               <div style={{
@@ -778,6 +810,137 @@ export default function SWMM5LegoBuilder() {
                     <div style={{ fontSize: 8, color: "#1B2A34", fontWeight: 600 }}>{d.desc}</div>
                   </button>
                 ))}
+              </div>
+            )}
+
+            {showBgControls && (
+              <div style={{
+                display: "flex", gap: 6, marginBottom: 6, padding: 10, borderRadius: 4,
+                background: "#F4F4F4", border: "3px solid #006DB7",
+                boxShadow: "4px 4px 0 rgba(0,0,0,0.4)", alignItems: "center", flexWrap: "wrap",
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 900, color: "#006DB7", fontFamily: "'Fredoka'" }}>🗺️ Background Map</div>
+                <button className="lego-btn sm" data-color="blue" onClick={() => bgFileRef.current?.click()}>Upload Image</button>
+                {bgImage && <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ fontSize: 9, color: "#1B2A34", fontWeight: 700 }}>Opacity:</span>
+                    <input type="range" min="0.05" max="0.8" step="0.05" value={bgOpacity}
+                      onChange={e => setBgOpacity(parseFloat(e.target.value))}
+                      style={{ width: 80, accentColor: "#006DB7" }} />
+                    <span style={{ fontSize: 9, color: "#006DB7", fontWeight: 800 }}>{(bgOpacity * 100).toFixed(0)}%</span>
+                  </div>
+                  <button className="lego-btn sm" data-color="red" onClick={() => { setBgImage(null); setShowBgControls(false); }}>Remove</button>
+                </>}
+                {!bgImage && (
+                  <div style={{ fontSize: 9, color: "#6C6E68", fontWeight: 600 }}>
+                    Upload a site plan, aerial photo, or GIS screenshot to use as a georeferenced background behind the grid.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {showWqPanel && (
+              <div style={{
+                marginBottom: 6, padding: 10, borderRadius: 4,
+                background: "#F4F4F4", border: "3px solid #4B9F4A",
+                boxShadow: "4px 4px 0 rgba(0,0,0,0.4)", color: "#1B2A34",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 900, color: "#4B9F4A", fontFamily: "'Fredoka'" }}>🧪 Water Quality Modeling</div>
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                    <input type="checkbox" checked={wqConfig.enabled}
+                      onChange={e => setWqConfig(prev => ({ ...prev, enabled: e.target.checked }))}
+                      style={{ accentColor: "#4B9F4A" }} />
+                    <span style={{ fontSize: 10, fontWeight: 800, color: wqConfig.enabled ? "#4B9F4A" : "#6C6E68" }}>
+                      {wqConfig.enabled ? "ENABLED" : "DISABLED"}
+                    </span>
+                  </label>
+                </div>
+                {wqConfig.enabled && (
+                  <div>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: "#6C6E68", marginBottom: 4 }}>
+                      Select pollutants to include in .INP export ([POLLUTANTS], [LANDUSES], [BUILDUP], [WASHOFF]):
+                    </div>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+                      {POLLUTANTS.map(p => (
+                        <label key={p.id} style={{
+                          display: "flex", alignItems: "center", gap: 3,
+                          padding: "3px 8px", borderRadius: 3, cursor: "pointer",
+                          background: wqConfig.selectedPollutants.includes(p.id) ? "#4B9F4A" : "#E4CD9E",
+                          color: wqConfig.selectedPollutants.includes(p.id) ? "#fff" : "#1B2A34",
+                          fontSize: 10, fontWeight: 700, fontFamily: "'Fredoka'",
+                          boxShadow: wqConfig.selectedPollutants.includes(p.id) ? "inset 1px 1px 0 rgba(0,0,0,0.15), 0 1px 0 rgba(0,0,0,0.3)" : "1px 2px 0 rgba(0,0,0,0.15)",
+                        }}>
+                          <input type="checkbox"
+                            checked={wqConfig.selectedPollutants.includes(p.id)}
+                            onChange={e => {
+                              setWqConfig(prev => ({
+                                ...prev,
+                                selectedPollutants: e.target.checked
+                                  ? [...prev.selectedPollutants, p.id]
+                                  : prev.selectedPollutants.filter(x => x !== p.id),
+                              }));
+                            }}
+                            style={{ accentColor: "#4B9F4A", width: 12, height: 12 }} />
+                          {p.id} <span style={{ fontSize: 8, opacity: 0.7 }}>({p.units})</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 8, color: "#6C6E68", lineHeight: 1.5 }}>
+                      Buildup: Power function (lb/ac) based on antecedent dry days per land use.
+                      Washoff: Event Mean Concentration (EMC) per land use and pollutant.
+                      Each surface type maps to a SWMM5 land use with literature-based EMC values.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {showAdvanced && (
+              <div style={{
+                marginBottom: 6, padding: 10, borderRadius: 4,
+                background: "#F4F4F4", border: "3px solid #5A93DB",
+                boxShadow: "4px 4px 0 rgba(0,0,0,0.4)", color: "#1B2A34",
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 900, color: "#006DB7", fontFamily: "'Fredoka'", marginBottom: 6 }}>⚙️ Advanced Settings</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "#1B2A34", marginBottom: 2 }}>Cell Spacing (ft)</div>
+                    <div style={{ fontSize: 8, color: "#6C6E68", marginBottom: 3 }}>
+                      Distance each grid cell represents. Adjust for irregular geometry approximation.
+                    </div>
+                    <input type="number" min={10} max={1000} step={10} value={cellSpacing}
+                      onChange={e => setCellSpacing(Math.max(10, parseFloat(e.target.value) || SPC))}
+                      style={{
+                        width: "100%", padding: "3px 6px", borderRadius: 3, border: "2px solid #E4CD9E",
+                        fontSize: 11, fontWeight: 700, fontFamily: "'Fredoka'",
+                        background: cellSpacing !== SPC ? "#FFF8DC" : "#fff",
+                      }} />
+                    <div style={{ fontSize: 8, color: "#5A93DB", fontWeight: 600, marginTop: 2 }}>
+                      Grid extent: {(gridSize * cellSpacing).toLocaleString()} × {(gridSize * cellSpacing).toLocaleString()} ft
+                      ({(gridSize * cellSpacing / 5280).toFixed(2)} mi × {(gridSize * cellSpacing / 5280).toFixed(2)} mi)
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "#1B2A34", marginBottom: 2 }}>Evaporation Rate (in/day)</div>
+                    <div style={{ fontSize: 8, color: "#6C6E68", marginBottom: 3 }}>
+                      Used for continuous simulations. 0.1 = temperate, 0.2 = arid.
+                    </div>
+                    <input type="number" min={0} max={0.5} step={0.01} value={evapRate}
+                      onChange={e => setEvapRate(Math.max(0, parseFloat(e.target.value) || 0.1))}
+                      style={{
+                        width: "100%", padding: "3px 6px", borderRadius: 3, border: "2px solid #E4CD9E",
+                        fontSize: 11, fontWeight: 700, fontFamily: "'Fredoka'",
+                        background: evapRate !== 0.1 ? "#FFF8DC" : "#fff",
+                      }} />
+                    <div style={{ fontSize: 8, color: "#5A93DB", fontWeight: 600, marginTop: 2 }}>
+                      {STORMS[stormIdx].continuous ? "📅 Continuous storm selected — evaporation will be applied" : "Single-event storm — evaporation N/A"}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 8, color: "#6C6E68", lineHeight: 1.5, background: "#fff", padding: 6, borderRadius: 3, border: "1px solid #E4CD9E" }}>
+                  <strong style={{ color: "#D01012" }}>Tip:</strong> For irregular/non-rectangular sites, set cell spacing to match your site's average lot dimension. Upload a background map image (🗺️ Map) to visually align the grid with real-world geography. The grid is a simplification — for complex municipal-scale systems, export the .INP and refine in desktop EPA SWMM5 with GIS coordinates.
+                </div>
               </div>
             )}
 
@@ -818,13 +981,22 @@ export default function SWMM5LegoBuilder() {
               backgroundPosition: `${cellSize/2}px ${cellSize/2}px`,
               borderRadius: 2,
               touchAction: "none",
+              position: "relative",
             }}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
             >
+              {bgImage && (
+                <img src={bgImage} alt="Background map overlay" style={{
+                  position: "absolute", top: 0, left: 0,
+                  width: gridSize * cellSize, height: gridSize * cellSize,
+                  opacity: bgOpacity, pointerEvents: "none", zIndex: 0,
+                  objectFit: "cover", borderRadius: 2,
+                }} />
+              )}
               {grid.map((row, r) => (
-                <div key={r} style={{ display: "flex" }}>
+                <div key={r} style={{ display: "flex", position: "relative", zIndex: 1 }}>
                   {row.map((cell, c) => (
                     <div key={c}
                       onMouseDown={e => { e.preventDefault(); setPainting(true); save(); place(r, c); setInspCell({r, c}); }}
@@ -1947,6 +2119,34 @@ export default function SWMM5LegoBuilder() {
 
           <div style={{
             background: "#F4F4F4", borderRadius: 4, padding: 8,
+            border: "3px solid #5A93DB", color: "#1B2A34",
+            boxShadow: "4px 4px 0 rgba(0,0,0,0.4)",
+          }}>
+            <div style={{
+              background: "#5A93DB", color: "#F4F4F4", fontWeight: 900,
+              padding: "2px 8px", borderRadius: 2, fontSize: 11, display: "inline-block", marginBottom: 4,
+            }}>🔬 ADVANCED FEATURES</div>
+            <div style={{ fontSize: 9, color: "#4A4C47", lineHeight: 1.7, fontWeight: 600 }}>
+              <div style={{ marginBottom: 3 }}>
+                <span style={{ color: "#006DB7", fontWeight: 800 }}>🗺️ Map Overlay:</span> Upload aerial photos, site plans, or GIS screenshots as a georeferenced background behind the grid
+              </div>
+              <div style={{ marginBottom: 3 }}>
+                <span style={{ color: "#4B9F4A", fontWeight: 800 }}>🧪 Water Quality:</span> Enable pollutant modeling (TSS, BOD, COD, TN, TP, Zn) with SWMM5 [POLLUTANTS], [LANDUSES], [BUILDUP], [WASHOFF] sections
+              </div>
+              <div style={{ marginBottom: 3 }}>
+                <span style={{ color: "#D01012", fontWeight: 800 }}>📅 Continuous Sim:</span> Multi-day storms (2–30 days) with evaporation and temperature — select from CONTINUOUS category
+              </div>
+              <div style={{ marginBottom: 3 }}>
+                <span style={{ color: "#FE8A18", fontWeight: 800 }}>⚙️ Cell Spacing:</span> Adjust grid cell dimensions (10–1000 ft) to approximate irregular site geometries
+              </div>
+              <div style={{ fontSize: 8, color: "#6C6E68", marginTop: 4, borderTop: "1px dashed #E4CD9E", paddingTop: 4, lineHeight: 1.6 }}>
+                <strong>Note:</strong> Grid-based models are best for concept design, teaching, and preliminary sizing. For complex municipal systems with irregular geometry, export the .INP file and refine coordinates in desktop EPA SWMM5 with full GIS integration.
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            background: "#F4F4F4", borderRadius: 4, padding: 8,
             border: "3px solid #6C6E68", color: "#1B2A34",
             boxShadow: "4px 4px 0 rgba(0,0,0,0.4)",
           }}>
@@ -2025,10 +2225,21 @@ export default function SWMM5LegoBuilder() {
                     cursor: "pointer", fontFamily: "'Fredoka', sans-serif", transition: "all 0.12s",
                     boxShadow: stormIdx === i ? "inset 1px 1px 0 rgba(255,255,255,0.2), 0 2px 0 rgba(0,0,0,0.3)" : "none",
                   }}>
-                    <div style={{ fontSize: 11, fontWeight: stormIdx === i ? 800 : 600, lineHeight: 1.3 }}>{st.name}</div>
+                    <div style={{ fontSize: 11, fontWeight: stormIdx === i ? 800 : 600, lineHeight: 1.3 }}>
+                      {st.name}
+                      {st.continuous && (
+                        <span style={{
+                          fontSize: 7, fontWeight: 800, padding: "1px 4px", borderRadius: 2,
+                          background: stormIdx === i ? "#F2C717" : "#5A93DB",
+                          color: stormIdx === i ? "#1B2A34" : "#fff",
+                          marginLeft: 4, verticalAlign: "middle",
+                        }}>{st.durationDays}d</span>
+                      )}
+                    </div>
                     {stormIdx === i && (
                       <div style={{ fontSize: 9, color: "#F2C717", marginTop: 2, fontWeight: 700 }}>
                         {st.desc} — Peak: {st.peak} • {st.total}
+                        {st.continuous && ` • ${st.durationDays}-day continuous`}
                       </div>
                     )}
                   </button>

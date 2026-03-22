@@ -26,6 +26,7 @@ export const STORM_CATS = [
   { key:"us", label:"🇺🇸 US STANDARDS" }, { key:"us_state", label:"🏛️ US STATE/LOCAL" },
   { key:"europe", label:"🇪🇺 EUROPE" }, { key:"asia", label:"🌏 ASIA-PACIFIC" },
   { key:"other", label:"🌍 OTHER REGIONS" }, { key:"generic", label:"📐 GENERIC" },
+  { key:"continuous", label:"📅 CONTINUOUS" },
 ];
 
 export const STORMS = [
@@ -84,4 +85,53 @@ export const STORMS = [
   _S("🔀 Double Peak","Multi-cell convective — dual Gaussian","generic",1,1,24,_IF(t=>2.5*Math.exp(-Math.pow((t-.3)/.08,2))+2*Math.exp(-Math.pow((t-.7)/.08,2)),1,1,24)),
   _S("📐 Yen & Chow Tri","r=0.375 SCS-like advance","generic",1,1,24,_IF(t=>t<=.375?t/.375:(1-t)/.625,1,1,24)),
   _S("✏️ Custom (Uniform)","Baseline — modify as needed","generic",1,1,24,Array(24).fill(1)),
+  (() => {
+    const N=72,P=3.5,D=72;
+    const rain=Array.from({length:N},(_,i)=>{const t=i/N;
+      return 0.3*Math.exp(-Math.pow((t-.15)/.06,2))+0.8*Math.exp(-Math.pow((t-.40)/.04,2))+0.5*Math.exp(-Math.pow((t-.70)/.05,2))+0.05;});
+    const tot=rain.reduce((s,v)=>s+v*(D/N),0);const sc=P/tot;
+    const s=_S("📅 3-Day Frontal","72hr multi-front — continuous sim","continuous",P,D,N,rain.map(v=>v*sc));
+    s.continuous=true;s.durationDays=3;return s;
+  })(),
+  (() => {
+    const N=168,P=5.0,D=168;
+    const rain=Array.from({length:N},(_,i)=>{const t=i/N;
+      return 0.2*Math.exp(-Math.pow((t-.10)/.03,2))+0.6*Math.exp(-Math.pow((t-.30)/.03,2))+0.4*Math.exp(-Math.pow((t-.55)/.04,2))+0.7*Math.exp(-Math.pow((t-.80)/.03,2))+0.03;});
+    const tot=rain.reduce((s,v)=>s+v*(D/N),0);const sc=P/tot;
+    const s=_S("📅 7-Day Series","168hr multi-event — wet week","continuous",P,D,N,rain.map(v=>v*sc));
+    s.continuous=true;s.durationDays=7;return s;
+  })(),
+  (() => {
+    const N=48,P=2.0,D=48;
+    const rain=Array.from({length:N},(_,i)=>{const t=i/N;
+      return 0.6*Math.exp(-Math.pow((t-.35)/.05,2))+0.4*Math.exp(-Math.pow((t-.75)/.04,2))+0.02;});
+    const tot=rain.reduce((s,v)=>s+v*(D/N),0);const sc=P/tot;
+    const s=_S("📅 2-Day Back-to-Back","48hr paired storms — antecedent moisture","continuous",P,D,N,rain.map(v=>v*sc));
+    s.continuous=true;s.durationDays=2;return s;
+  })(),
+  (() => {
+    const N=360,P=8.0,D=360;
+    const rain=Array.from({length:N},(_,i)=>{const t=i/N;
+      const base=0.02;
+      const e1=0.4*Math.exp(-Math.pow((t-.07)/.02,2));
+      const e2=0.3*Math.exp(-Math.pow((t-.20)/.03,2));
+      const e3=0.8*Math.exp(-Math.pow((t-.40)/.03,2));
+      const e4=0.5*Math.exp(-Math.pow((t-.60)/.03,2));
+      const e5=0.6*Math.exp(-Math.pow((t-.80)/.02,2));
+      const e6=0.3*Math.exp(-Math.pow((t-.92)/.02,2));
+      return base+e1+e2+e3+e4+e5+e6;});
+    const tot=rain.reduce((s,v)=>s+v*(D/N),0);const sc=P/tot;
+    const s=_S("📅 15-Day Wet Season","360hr extended — seasonal analysis","continuous",P,D,N,rain.map(v=>v*sc));
+    s.continuous=true;s.durationDays=15;return s;
+  })(),
+  (() => {
+    const N=720,P=12.0,D=720;
+    const rain=Array.from({length:N},(_,i)=>{const t=i/N;
+      let v=0.01;
+      for(let k=0;k<10;k++){const pk=0.05+k*0.095;v+=((k%3===0)?0.7:0.3)*Math.exp(-Math.pow((t-pk)/.012,2));}
+      return v;});
+    const tot=rain.reduce((s,v)=>s+v*(D/N),0);const sc=P/tot;
+    const s=_S("📅 30-Day Monthly","720hr monsoon/wet month — long-term","continuous",P,D,N,rain.map(v=>v*sc));
+    s.continuous=true;s.durationDays=30;return s;
+  })(),
 ];
