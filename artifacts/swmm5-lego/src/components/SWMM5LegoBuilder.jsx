@@ -8,6 +8,7 @@ import { validateModel, autoFix } from "../lib/validation.js";
 import { exportResultsCsv } from "../lib/exportCsv.js";
 import { saveToLocalStorage, loadFromLocalStorage, getSaveSlots, saveToSlot, deleteSlot } from "../lib/persistence.js";
 import { exportINP } from "../lib/exportInp.js";
+import { generateHtmlReport } from "../lib/exportHtmlReport.js";
 import { importINP } from "../lib/importInp.js";
 import { DEMOS } from "../lib/demos.js";
 import { initSwmmWasm, runSwmmWasm, isSwmmReady } from "../lib/swmmWasm.js";
@@ -1236,6 +1237,30 @@ export default function SWMM5LegoBuilder() {
                       <div style={{ fontSize: 8, color: "#6C6E68" }}>{s.l} ({s.u})</div>
                     </div>
                   ))}
+                </div>
+              )}
+              {!isRunning && simResult && (
+                <div style={{ marginTop: 8, textAlign: "center" }}>
+                  <button onClick={() => {
+                    const html = generateHtmlReport(simResult, STORMS[stormIdx], gridSize, {
+                      subcatchments: simResult.subcatchments.length,
+                      nodes: simResult.nodes.length,
+                      conduits: simResult.conduits.length,
+                    });
+                    const blob = new Blob([html], { type: "text/html" });
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.download = "swmm5_lego_report.html";
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                  }} style={{
+                    padding: "6px 18px", borderRadius: 6,
+                    background: "linear-gradient(135deg, #D01012 0%, #A00C0E 100%)",
+                    border: "3px solid #F2C717", color: "#F2C717", cursor: "pointer",
+                    fontSize: 11, fontWeight: 800, fontFamily: "'Fredoka', sans-serif",
+                    boxShadow: "0 3px 0 rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2)",
+                    letterSpacing: "0.5px",
+                  }}>📊 Download HTML Graph Report</button>
                 </div>
               )}
             </div>
