@@ -60,9 +60,21 @@ export async function runSwmmWasm(inpContent) {
     rpt = `Could not read RPT: ${e.message}`;
   }
 
+  let outBinary = null;
+  try {
+    const raw = fs.readFile('/output.out');
+    if (raw && raw.length > 24) {
+      const copy = new Uint8Array(raw.length);
+      copy.set(raw);
+      outBinary = copy.buffer;
+    }
+  } catch(e) {
+    console.warn('Could not read .out binary:', e.message);
+  }
+
   try { fs.unlink('/input.inp'); } catch(e) {}
   try { fs.unlink('/output.rpt'); } catch(e) {}
   try { fs.unlink('/output.out'); } catch(e) {}
 
-  return { returnCode, rpt };
+  return { returnCode, rpt, outBinary };
 }

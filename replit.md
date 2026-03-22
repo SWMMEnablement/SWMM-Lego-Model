@@ -53,6 +53,8 @@ Interactive browser-based stormwater management model builder. Features:
 - Resizable grid (20x20 to 50x50)
 - Model validation with CFL Courant number checks and auto-fix
 - Per-cell property editing via right-click context menu (override CN, % imperv, Manning's n, slope, pipe diameter, node depth)
+- Binary .out file parser extracting full time-series data (node depths/heads/inflows/flooding, link flows/velocities/capacity, system flows/rainfall/outfall, subcatchment runoff) from SWMM5 WASM output
+- Time Series tab in EPA SWMM5 Results showing interactive recharts for system flows, rainfall, node depths, node inflows, link flows, link velocities, subcatchment runoff — all from the binary output
 - Time-series CSV export for all result tabs
 - Downloadable standalone HTML Graph Report with all 4 chart types (system hydrograph, subcatchment runoff, node depths, conduit flows), peak stat cards, rainfall hyetograph, LEGO-themed styling, print-friendly CSS — self-contained file using Canvas API rendering
 - Save/Load to localStorage (auto-save + 5 named slots)

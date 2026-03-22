@@ -13,6 +13,7 @@ import { importINP } from "../lib/importInp.js";
 import { DEMOS } from "../lib/demos.js";
 import { initSwmmWasm, runSwmmWasm, isSwmmReady } from "../lib/swmmWasm.js";
 import { parseRpt } from "../lib/parseRpt.js";
+import { parseOutBinary } from "../lib/parseOut.js";
 import "./LegoToolbar.css";
 
 function GridCell({ element, isHov, hasErr, hasWarn, hasOverride, flowIntensity, depthFrac, row, col, cellSize: cs }) {
@@ -139,6 +140,7 @@ export default function SWMM5LegoBuilder() {
   const [wasmLoading, setWasmLoading] = useState(false);
   const [wasmRpt, setWasmRpt] = useState(null);
   const [wasmParsed, setWasmParsed] = useState(null);
+  const [wasmBinaryResults, setWasmBinaryResults] = useState(null);
   const [showRpt, setShowRpt] = useState(false);
   const [rptTab, setRptTab] = useState("summary");
   const animRef = useRef(null);
@@ -384,16 +386,27 @@ export default function SWMM5LegoBuilder() {
     setValidation(v);
     if (v.errors.length > 0) return;
     setWasmLoading(true);
-    setWasmRpt(null); setWasmParsed(null);
+    setWasmRpt(null); setWasmParsed(null); setWasmBinaryResults(null);
     try {
       const inp = exportINP(grid, STORMS[stormIdx], cellProps);
-      const { returnCode, rpt } = await runSwmmWasm(inp);
+      const { returnCode, rpt, outBinary } = await runSwmmWasm(inp);
       setWasmRpt(rpt);
       const parsed = parseRpt(rpt);
       if (returnCode !== 0 && parsed.errors.length === 0) {
         parsed.errors.push(`SWMM5 returned code ${returnCode}`);
       }
       setWasmParsed(parsed);
+      if (outBinary) {
+        try {
+          const binResults = parseOutBinary(outBinary);
+          setWasmBinaryResults(binResults);
+          console.log(`Binary .out parsed: ${binResults.nPeriods} periods, ${binResults.nodeResults.length} nodes, ${binResults.linkResults.length} links, ${binResults.subcatchResults.length} subcatchments`);
+        } catch (be) {
+          console.warn('Binary .out parse error:', be.message);
+        }
+      } else {
+        console.warn('No binary .out file produced by SWMM5 WASM');
+      }
       setShowRpt(true);
       setRptTab("summary");
     } catch (e) {
@@ -1337,6 +1350,7 @@ export default function SWMM5LegoBuilder() {
                     { k: "subcatch", l: "🌧️ Subcatchments" },
                     { k: "nodes", l: "⚙️ Nodes" },
                     { k: "links", l: "🔵 Links" },
+                    ...(wasmBinaryResults ? [{ k: "timeseries", l: "📈 Time Series" }] : []),
                     { k: "continuity", l: "💧 Continuity" },
                     { k: "raw", l: "📄 Raw RPT" },
                   ].map(t => (
@@ -1643,6 +1657,161 @@ export default function SWMM5LegoBuilder() {
                     )}
                   </div>
                 )}
+
+                {rptTab === "timeseries" && wasmBinaryResults && (() => {
+                  const br = wasmBinaryResults;
+                  const COLORS_TS = ['#70C442','#5A93DB','#D01012','#F2C717','#FE8A18','#006DB7','#6C6E68','#4B9F4A'];
+                  return (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 900, color: "#006DB7", marginBottom: 6 }}>
+                        📈 Binary Output Time Series — {br.nPeriods} periods × {br.reportStep}s step — {br.flowUnits}
+                      </div>
+
+                      <div style={{ fontSize: 12, fontWeight: 900, color: "#D01012", marginBottom: 6, marginTop: 8 }}>
+                        System Flows
+                      </div>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <LineChart data={br.systemHistory} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E4CD9E" />
+                          <XAxis dataKey="t" tick={{ fontSize: 8, fill: "#1B2A34" }} label={{ value: "Time (min)", position: "insideBottom", offset: -3, fontSize: 8, fill: "#1B2A34" }} />
+                          <YAxis tick={{ fontSize: 8, fill: "#1B2A34" }} label={{ value: `Flow (${br.flowUnits})`, angle: -90, position: "insideLeft", fontSize: 8, fill: "#1B2A34" }} />
+                          <Tooltip contentStyle={{ background: "#fff", border: "2px solid #6C6E68", borderRadius: 4, fontSize: 9, color: "#1B2A34" }}
+                            formatter={(v, n) => [Number(v).toFixed(4), n]} labelFormatter={v => `${Number(v).toFixed(1)} min`} />
+                          <Legend wrapperStyle={{ fontSize: 8 }} />
+                          <Line type="monotone" dataKey="runoff" stroke="#70C442" strokeWidth={2} dot={false} name="Runoff" />
+                          <Line type="monotone" dataKey="totalLatInflow" stroke="#FE8A18" strokeWidth={1.5} dot={false} name="Total Lat. Inflow" />
+                          <Line type="monotone" dataKey="outfallFlow" stroke="#D01012" strokeWidth={2} dot={false} name="Outfall" />
+                          <Line type="monotone" dataKey="flooding" stroke="#F2C717" strokeWidth={1.5} dot={false} name="Flooding" />
+                        </LineChart>
+                      </ResponsiveContainer>
+
+                      <div style={{ fontSize: 11, fontWeight: 900, color: "#5A93DB", marginTop: 6, marginBottom: 4 }}>
+                        Rainfall (in/hr)
+                      </div>
+                      <ResponsiveContainer width="100%" height={80}>
+                        <BarChart data={br.systemHistory.filter((_, i) => i % Math.max(1, Math.floor(br.systemHistory.length / 60)) === 0)} margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
+                          <XAxis dataKey="t" tick={{ fontSize: 7, fill: "#1B2A34" }} />
+                          <YAxis tick={{ fontSize: 7, fill: "#1B2A34" }} />
+                          <Bar dataKey="rainfall" fill="#5A93DB" radius={[2, 2, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+
+                      {br.nodeResults.length > 0 && <>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: "#FE8A18", marginBottom: 6, marginTop: 10 }}>
+                          Node Depths ({br.nodeResults.length} nodes)
+                        </div>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <LineChart margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#E4CD9E" />
+                            <XAxis dataKey="t" type="number" tick={{ fontSize: 8, fill: "#1B2A34" }}
+                              domain={[0, br.systemHistory[br.systemHistory.length - 1]?.t || 0]} />
+                            <YAxis tick={{ fontSize: 8, fill: "#1B2A34" }} label={{ value: "Depth (ft)", angle: -90, position: "insideLeft", fontSize: 8, fill: "#1B2A34" }} />
+                            <Tooltip contentStyle={{ background: "#fff", border: "2px solid #6C6E68", borderRadius: 4, fontSize: 9, color: "#1B2A34" }}
+                              formatter={(v) => [Number(v).toFixed(3)]} labelFormatter={v => `${Number(v).toFixed(1)} min`} />
+                            <Legend wrapperStyle={{ fontSize: 8 }} />
+                            {br.nodeResults.slice(0, 6).map((n, i) => (
+                              <Line key={n.id} data={n.history} type="monotone" dataKey="depth"
+                                stroke={COLORS_TS[i % COLORS_TS.length]} strokeWidth={1.5} dot={false} name={n.id} />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+
+                        <div style={{ fontSize: 12, fontWeight: 900, color: "#006DB7", marginBottom: 6, marginTop: 6 }}>
+                          Node Inflows ({br.nodeResults.length} nodes)
+                        </div>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <LineChart margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#E4CD9E" />
+                            <XAxis dataKey="t" type="number" tick={{ fontSize: 8, fill: "#1B2A34" }}
+                              domain={[0, br.systemHistory[br.systemHistory.length - 1]?.t || 0]} />
+                            <YAxis tick={{ fontSize: 8, fill: "#1B2A34" }} label={{ value: `Inflow (${br.flowUnits})`, angle: -90, position: "insideLeft", fontSize: 8, fill: "#1B2A34" }} />
+                            <Tooltip contentStyle={{ background: "#fff", border: "2px solid #6C6E68", borderRadius: 4, fontSize: 9, color: "#1B2A34" }}
+                              formatter={(v) => [Number(v).toFixed(4)]} labelFormatter={v => `${Number(v).toFixed(1)} min`} />
+                            <Legend wrapperStyle={{ fontSize: 8 }} />
+                            {br.nodeResults.slice(0, 6).map((n, i) => (
+                              <Line key={n.id} data={n.history} type="monotone" dataKey="totalInflow"
+                                stroke={COLORS_TS[i % COLORS_TS.length]} strokeWidth={1.5} dot={false} name={n.id} />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </>}
+
+                      {br.linkResults.length > 0 && <>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: "#5A93DB", marginBottom: 6, marginTop: 10 }}>
+                          Link Flows ({br.linkResults.length} links)
+                        </div>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <LineChart margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#E4CD9E" />
+                            <XAxis dataKey="t" type="number" tick={{ fontSize: 8, fill: "#1B2A34" }}
+                              domain={[0, br.systemHistory[br.systemHistory.length - 1]?.t || 0]} />
+                            <YAxis tick={{ fontSize: 8, fill: "#1B2A34" }} label={{ value: `Flow (${br.flowUnits})`, angle: -90, position: "insideLeft", fontSize: 8, fill: "#1B2A34" }} />
+                            <Tooltip contentStyle={{ background: "#fff", border: "2px solid #6C6E68", borderRadius: 4, fontSize: 9, color: "#1B2A34" }}
+                              formatter={(v) => [Number(v).toFixed(4)]} labelFormatter={v => `${Number(v).toFixed(1)} min`} />
+                            <Legend wrapperStyle={{ fontSize: 8 }} />
+                            {br.linkResults.slice(0, 6).map((l, i) => (
+                              <Line key={l.id} data={l.history} type="monotone" dataKey="flow"
+                                stroke={COLORS_TS[i % COLORS_TS.length]} strokeWidth={1.5} dot={false} name={l.id} />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+
+                        <div style={{ fontSize: 12, fontWeight: 900, color: "#FE8A18", marginBottom: 6, marginTop: 6 }}>
+                          Link Velocities
+                        </div>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <LineChart margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#E4CD9E" />
+                            <XAxis dataKey="t" type="number" tick={{ fontSize: 8, fill: "#1B2A34" }}
+                              domain={[0, br.systemHistory[br.systemHistory.length - 1]?.t || 0]} />
+                            <YAxis tick={{ fontSize: 8, fill: "#1B2A34" }} label={{ value: "Velocity (ft/s)", angle: -90, position: "insideLeft", fontSize: 8, fill: "#1B2A34" }} />
+                            <Tooltip contentStyle={{ background: "#fff", border: "2px solid #6C6E68", borderRadius: 4, fontSize: 9, color: "#1B2A34" }}
+                              formatter={(v) => [Number(v).toFixed(3)]} labelFormatter={v => `${Number(v).toFixed(1)} min`} />
+                            <Legend wrapperStyle={{ fontSize: 8 }} />
+                            {br.linkResults.slice(0, 6).map((l, i) => (
+                              <Line key={l.id} data={l.history} type="monotone" dataKey="velocity"
+                                stroke={COLORS_TS[i % COLORS_TS.length]} strokeWidth={1.5} dot={false} name={l.id} />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </>}
+
+                      {br.subcatchResults.length > 0 && <>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: "#4B9F4A", marginBottom: 6, marginTop: 10 }}>
+                          Subcatchment Runoff ({br.subcatchResults.length} subcatchments)
+                        </div>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <LineChart margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#E4CD9E" />
+                            <XAxis dataKey="t" type="number" tick={{ fontSize: 8, fill: "#1B2A34" }}
+                              domain={[0, br.systemHistory[br.systemHistory.length - 1]?.t || 0]} />
+                            <YAxis tick={{ fontSize: 8, fill: "#1B2A34" }} label={{ value: `Runoff (${br.flowUnits})`, angle: -90, position: "insideLeft", fontSize: 8, fill: "#1B2A34" }} />
+                            <Tooltip contentStyle={{ background: "#fff", border: "2px solid #6C6E68", borderRadius: 4, fontSize: 9, color: "#1B2A34" }}
+                              formatter={(v) => [Number(v).toFixed(4)]} labelFormatter={v => `${Number(v).toFixed(1)} min`} />
+                            <Legend wrapperStyle={{ fontSize: 8 }} />
+                            {br.subcatchResults.slice(0, 6).map((sc, i) => (
+                              <Line key={sc.id} data={sc.history} type="monotone" dataKey="runoff"
+                                stroke={COLORS_TS[i % COLORS_TS.length]} strokeWidth={1.5} dot={false} name={sc.id} />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </>}
+
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginTop: 10 }}>
+                        {[
+                          { l: "Periods", v: br.nPeriods, c: "#006DB7" },
+                          { l: "Step", v: `${br.reportStep}s`, c: "#FE8A18" },
+                          { l: "Duration", v: `${((br.nPeriods * br.reportStep) / 60).toFixed(0)} min`, c: "#4B9F4A" },
+                        ].map((s, i) => (
+                          <div key={i} style={{ background: "#fff", borderRadius: 4, padding: 6, textAlign: "center", border: "2px solid #E4CD9E" }}>
+                            <div style={{ fontSize: 14, fontWeight: 800, color: s.c, fontFamily: "'Fredoka'" }}>{s.v}</div>
+                            <div style={{ fontSize: 8, color: "#6C6E68", fontWeight: 700 }}>{s.l}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {rptTab === "continuity" && (
                   <div>
