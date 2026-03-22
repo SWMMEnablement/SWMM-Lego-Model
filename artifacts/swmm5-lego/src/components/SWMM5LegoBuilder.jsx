@@ -61,10 +61,10 @@ function GridCell({ element, isHov, hasErr, hasWarn, hasOverride, flowIntensity,
       border: borderStyle,
       fontSize: el ? Math.max(8, Math.round(cz * 0.4)) : 0,
       ...(errShadow ? { boxShadow: errShadow } : {}),
-      ...(extraShadow && !hasErr && !hasWarn && el ? { boxShadow: `inset 3px 3px 0 0 rgba(255,255,255,0.25), inset -3px -4px 0 0 rgba(0,0,0,0.30), 2px 3px 0 0 rgba(0,0,0,0.40)${extraShadow}` } : {}),
+      ...(extraShadow && !hasErr && !hasWarn && el ? { boxShadow: `inset 4px 4px 0 0 rgba(255,255,255,0.35), inset -2px -2px 0 0 rgba(0,0,0,0.15), inset -4px -5px 0 0 rgba(0,0,0,0.25), 3px 4px 0 0 rgba(0,0,0,0.45), 3px 4px 4px 0 rgba(0,0,0,0.15)${extraShadow}` } : {}),
     }}>
       {el && <div className="stud" />}
-      <span style={{ position: "relative", zIndex: 2, textShadow: el ? "1px 1px 0 rgba(0,0,0,0.4)" : "none" }}>{el ? el.e : ""}</span>
+      <span style={{ position: "relative", zIndex: 2, textShadow: el ? "1px 1px 0 rgba(0,0,0,0.5), 0 0 3px rgba(0,0,0,0.15), -1px -1px 0 rgba(255,255,255,0.10)" : "none", filter: el ? "drop-shadow(0 1px 1px rgba(0,0,0,0.25))" : "none" }}>{el ? el.e : ""}</span>
       {depthFrac > 0 && el?.cat === "node" && (
         <div style={{
           position: "absolute", bottom: 0, left: 0, right: 0,
@@ -90,7 +90,7 @@ function PalBtn({ type, sel, onClick }) {
         fontWeight: on ? 700 : 500,
         borderBottomColor: on ? "rgba(0,0,0,0.35)" : undefined,
       }}>
-      <span style={{ fontSize: 13, lineHeight: 1, position: "relative", zIndex: 2, textShadow: on ? "1px 1px 0 rgba(0,0,0,0.5)" : "none" }}>{el.e}</span>
+      <span style={{ fontSize: 13, lineHeight: 1, position: "relative", zIndex: 2, textShadow: on ? "1px 1px 0 rgba(0,0,0,0.5), 0 0 3px rgba(0,0,0,0.15)" : "none", filter: on ? "drop-shadow(0 1px 1px rgba(0,0,0,0.3))" : "none" }}>{el.e}</span>
       <span style={{ fontSize: 7, lineHeight: 1, position: "relative", zIndex: 2, textShadow: on ? "1px 1px 0 rgba(0,0,0,0.5)" : "none", fontWeight: 800 }}>{el.lbl}</span>
     </button>
   );
