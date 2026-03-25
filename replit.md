@@ -57,8 +57,13 @@ Interactive browser-based stormwater management model builder. Features:
 - Time Series tab in EPA SWMM5 Results showing interactive recharts for system flows, rainfall, node depths, node inflows, link flows, link velocities, subcatchment runoff — all from the binary output
 - Time-series CSV export for all result tabs
 - Downloadable standalone HTML Graph Report with all 4 chart types (system hydrograph, subcatchment runoff, node depths, conduit flows), peak stat cards, rainfall hyetograph, LEGO-themed styling, print-friendly CSS — self-contained file using Canvas API rendering
-- Save/Load to localStorage (auto-save + 5 named slots)
-- Keyboard shortcuts: Ctrl+Z (undo), Space (toggle paint/erase), Del (erase mode), R (run), Esc (close panels), 1-9 (select surface), Shift+1-5 (select node), Q/W/E (pipe/channel/pump)
+- Save/Load to localStorage (auto-save + 5 named slots, schema v2 with extras)
+- JSON model export/import (download/upload full model as JSON file)
+- Undo/Redo support (Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, 30-step history)
+- US/SI unit system toggle (FLOW_UNITS CFS or CMS in INP export)
+- Subcatchment outlet selection via right-click dropdown (override auto-nearest-node)
+- Web Worker simulation (Quick Sim runs off main thread, fallback to main thread on error)
+- Keyboard shortcuts: Ctrl+Z (undo), Ctrl+Shift+Z (redo), Space (toggle paint/erase), Del (erase mode), R (run), Esc (close panels), 1-9 (select surface), Shift+1-5 (select node), Q/W/E (pipe/channel/pump), Arrow keys (grid navigation), Enter (place element)
 - Mobile touch support: single-finger paint/drag on grid with touch-action:none for smooth drawing; long-press (500ms) to open property editor on placed cells
 - Fully responsive layout: three-column desktop (left palette 210px, center grid, right sidebar 280px) stacks vertically on mobile (<768px); dynamic cell sizing scales grid to fit mobile screens; DUAL ENGINES and SHORTCUTS panels hidden on mobile; toolbar buttons, studs, and palette scale down via CSS media queries
 - Background map overlay: upload aerial photos, site plans, or GIS screenshots as a georeferenced background behind the grid with adjustable opacity
@@ -102,19 +107,24 @@ Interactive browser-based stormwater management model builder. Features:
 **Key dependencies**: React, recharts (charts), Vite (build)
 
 **Architecture** (modularized):
-- `src/components/SWMM5LegoBuilder.jsx` — Main React component (~1828 lines, inline styles)
+- `src/components/SWMM5LegoBuilder.jsx` — Main React component (~2400 lines, inline styles)
+- `src/components/GridCell.jsx` — Extracted GridCell (memo'd) and PalBtn components
+- `src/components/Tutorial.jsx` — Extracted tutorial/onboarding overlay
 - `src/lib/elements.js` — Element definitions (EL, CATS), grid utilities, mutable GRID via getGrid()/setGrid()
 - `src/lib/storms.js` — 49+ design storms with storm category definitions (incl. 5 continuous multi-day)
 - `src/lib/pollutants.js` — Water quality module: 6 pollutants, 10 land uses, buildup/washoff parameters
-- `src/lib/hydraulics.js` — SWMM5 JS engine (buildModel, runSWMM5, Manning's equations, CN infiltration)
+- `src/lib/hydraulics.js` — SWMM5 JS engine (buildModel, runSWMM5, Manning's equations, CN infiltration; separates junctions/storage/dividers and conduits/pumps/orifices/weirs)
+- `src/lib/simWorker.js` — Web Worker wrapper for runSWMM5 (off-main-thread simulation)
 - `src/lib/swmmWasm.js` — EPA SWMM5 WASM wrapper (Emscripten module loader, virtual FS I/O, ccall to swmm_run)
 - `src/lib/parseRpt.js` — SWMM5 .RPT output parser (subcatchments, nodes, links, continuity, analysis options)
 - `src/lib/validation.js` — Model validation with CFL checks and auto-fix
 - `src/lib/exportCsv.js` — Time-series CSV export
-- `src/lib/persistence.js` — localStorage save/load (auto-save + named slots)
-- `src/lib/exportInp.js` — SWMM5 .INP file export
+- `src/lib/persistence.js` — localStorage save/load (auto-save + named slots, schema v2)
+- `src/lib/exportInp.js` — SWMM5 .INP file export (supports US/SI flow units, storage/pump/orifice/weir sections)
 - `src/lib/importInp.js` — SWMM5 .INP file import with auto grid sizing
+- `src/lib/units.js` — Unit system definitions (US/SI), conversion functions, formatting
 - `src/lib/demos.js` — 13 demo model builders
+- `src/__tests__/` — Vitest unit tests for hydraulics, exportInp, validation, units (43 tests)
 - `src/components/LegoToolbar.css` — 3D LEGO brick toolbar CSS (studs, depth borders, press animations, color variants via data-color)
 - `public/swmm/` — EPA SWMM5 v5.2.4 WASM binaries (js.wasm, js.js compiled from OWA SWMM v5.2.4 source with Emscripten 2.0.10)
 

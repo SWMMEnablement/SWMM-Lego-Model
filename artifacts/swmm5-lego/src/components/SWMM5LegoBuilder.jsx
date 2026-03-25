@@ -6,7 +6,7 @@ import { STORM_CATS, STORMS } from "../lib/storms.js";
 import { runSWMM5 } from "../lib/hydraulics.js";
 import { validateModel, autoFix } from "../lib/validation.js";
 import { exportResultsCsv } from "../lib/exportCsv.js";
-import { saveToLocalStorage, loadFromLocalStorage, getSaveSlots, saveToSlot, deleteSlot } from "../lib/persistence.js";
+import { saveToLocalStorage, loadFromLocalStorage, getSaveSlots, saveToSlot, deleteSlot, exportModelJSON, importModelJSON } from "../lib/persistence.js";
 import { exportINP } from "../lib/exportInp.js";
 import { generateHtmlReport } from "../lib/exportHtmlReport.js";
 import { importINP } from "../lib/importInp.js";
@@ -15,89 +15,10 @@ import { initSwmmWasm, runSwmmWasm, isSwmmReady } from "../lib/swmmWasm.js";
 import { parseRpt } from "../lib/parseRpt.js";
 import { parseOutBinary } from "../lib/parseOut.js";
 import { POLLUTANTS, DEFAULT_WQ_CONFIG } from "../lib/pollutants.js";
+import { UNIT_SYSTEMS, convert } from "../lib/units.js";
+import { GridCell, PalBtn } from "./GridCell.jsx";
+import Tutorial from "./Tutorial.jsx";
 import "./LegoToolbar.css";
-
-function GridCell({ element, isHov, hasErr, hasWarn, hasOverride, flowIntensity, depthFrac, row, col, cellSize: cs }) {
-  const cz = cs || CELL;
-  const el = element ? EL[element] : null;
-  const base = el ? el.clr : "transparent";
-  const GRID = getGrid();
-
-  let flowGlow = "";
-  if (flowIntensity > 0 && el) {
-    const alpha = Math.min(flowIntensity, 1);
-    flowGlow = `, inset 0 0 ${8 + alpha * 12}px rgba(56,189,248,${alpha * 0.8})`;
-  }
-  if (depthFrac > 0 && el?.cat === "node") {
-    const alpha = Math.min(depthFrac, 1);
-    flowGlow = `, inset 0 0 ${10 + alpha * 14}px rgba(251,191,36,${alpha * 0.7})`;
-  }
-
-  let tip = `(${row}, ${col})`;
-  if (el) {
-    tip = `${el.e} ${el.lbl} @ (${row}, ${col})`;
-    if (el.cat === "surface") tip += `\nCN: ${el.cn} • %Imperv: ${el.pI}`;
-    if (el.cat === "surface") tip += `\nn-Imperv: ${el.nI} • n-Perv: ${el.nP}`;
-    if (el.cat === "surface") tip += `\nDs-Imp: ${el.sI}" • Ds-Perv: ${el.sP}"`;
-    if (el.cat === "node" && el.maxD) tip += `\nMax Depth: ${el.maxD} ft`;
-    if (el.cat === "node") tip += `\nInvert: ${((GRID - row) * 0.5).toFixed(1)} ft`;
-    if (el.cat === "link") tip += `\nDia: ${el.diam} ft • n: ${el.mann}`;
-    if (el.cat === "surface") tip += `\n→ [SUBCATCHMENTS]`;
-    if (element === "manhole" || element === "inlet") tip += `\n→ [JUNCTIONS]`;
-    if (element === "outfall") tip += `\n→ [OUTFALLS]`;
-    if (element === "pipe") tip += `\n→ [CONDUITS]`;
-    if (hasOverride) tip += `\n★ Custom properties (right-click to edit)`;
-    if (flowIntensity > 0) tip += `\n🌊 Flow: ${(flowIntensity * 2).toFixed(3)} CFS`;
-    if (depthFrac > 0) tip += `\n💧 Depth: ${(depthFrac * (el.maxD || 6)).toFixed(2)} ft`;
-  } else {
-    tip += "\nEmpty — click to place\nRight-click placed cells to edit properties";
-  }
-
-  const extraShadow = flowGlow ? flowGlow : "";
-  const borderStyle = hasErr ? "2px solid #D01012" : hasWarn ? "2px solid #FE8A18" : hasOverride ? "2px solid #F2C717" : isHov && !el ? "2px solid rgba(255,255,255,0.25)" : "none";
-  const errShadow = hasErr ? `0 0 8px rgba(208,16,18,0.6)${extraShadow}` : hasWarn ? `0 0 8px rgba(254,138,24,0.5)${extraShadow}` : "";
-
-  return (
-    <div title={tip} className={`lego-grid-cell${el ? " filled" : ""}`} style={{
-      width: cz, height: cz,
-      background: el ? base : "transparent",
-      border: borderStyle,
-      fontSize: el ? Math.max(8, Math.round(cz * 0.4)) : 0,
-      ...(errShadow ? { boxShadow: errShadow } : {}),
-      ...(extraShadow && !hasErr && !hasWarn && el ? { boxShadow: `inset 4px 4px 0 0 rgba(255,255,255,0.35), inset -2px -2px 0 0 rgba(0,0,0,0.15), inset -4px -5px 0 0 rgba(0,0,0,0.25), 3px 4px 0 0 rgba(0,0,0,0.45), 3px 4px 4px 0 rgba(0,0,0,0.15)${extraShadow}` } : {}),
-    }}>
-      {el && <div className="stud" />}
-      <span style={{ position: "relative", zIndex: 2, textShadow: el ? "1px 1px 0 rgba(0,0,0,0.5), 0 0 3px rgba(0,0,0,0.15), -1px -1px 0 rgba(255,255,255,0.10)" : "none", filter: el ? "drop-shadow(0 1px 1px rgba(0,0,0,0.25))" : "none" }}>{el ? el.e : ""}</span>
-      {depthFrac > 0 && el?.cat === "node" && (
-        <div style={{
-          position: "absolute", bottom: 0, left: 0, right: 0,
-          height: `${Math.min(depthFrac * 100, 100)}%`,
-          background: "rgba(56,189,248,0.35)",
-          borderRadius: "0 0 2px 2px",
-          transition: "height 0.3s ease",
-        }} />
-      )}
-    </div>
-  );
-}
-
-function PalBtn({ type, sel, onClick }) {
-  const el = EL[type];
-  const on = sel === type;
-  return (
-    <button onClick={() => onClick(type)} title={`${el.lbl}${el.cn !== undefined ? ` • CN:${el.cn} • %Imp:${el.pI}` : ""}${el.maxD ? ` • MaxD:${el.maxD}ft` : ""}${el.diam ? ` • Dia:${el.diam}ft` : ""}`}
-      className={`lego-pal-btn${on ? " selected" : ""}`}
-      style={{
-        background: on ? el.clr : undefined,
-        color: on ? "#fff" : "#A0A19B",
-        fontWeight: on ? 700 : 500,
-        borderBottomColor: on ? "rgba(0,0,0,0.35)" : undefined,
-      }}>
-      <span style={{ fontSize: 13, lineHeight: 1, position: "relative", zIndex: 2, textShadow: on ? "1px 1px 0 rgba(0,0,0,0.5), 0 0 3px rgba(0,0,0,0.15)" : "none", filter: on ? "drop-shadow(0 1px 1px rgba(0,0,0,0.3))" : "none" }}>{el.e}</span>
-      <span style={{ fontSize: 7, lineHeight: 1, position: "relative", zIndex: 2, textShadow: on ? "1px 1px 0 rgba(0,0,0,0.5)" : "none", fontWeight: 800 }}>{el.lbl}</span>
-    </button>
-  );
-}
 
 function useIsMobile(breakpoint = 768) {
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= breakpoint);
@@ -119,6 +40,8 @@ export default function SWMM5LegoBuilder() {
   const [erasing, setErasing] = useState(false);
   const [painting, setPainting] = useState(false);
   const [hist, setHist] = useState([]);
+  const [future, setFuture] = useState([]);
+  const [unitSystem, setUnitSystem] = useState("us");
   const [validation, setValidation] = useState(null);
   const [fixLog, setFixLog] = useState([]);
   const [simResult, setSimResult] = useState(null);
@@ -131,7 +54,6 @@ export default function SWMM5LegoBuilder() {
   const [tab, setTab] = useState("system");
   const [inspCell, setInspCell] = useState(null);
   const [showTutorial, setShowTutorial] = useState(true);
-  const [tutStep, setTutStep] = useState(0);
   const [cellProps, setCellProps] = useState({});
   const [ctxMenu, setCtxMenu] = useState(null);
   const [showSavePanel, setShowSavePanel] = useState(false);
@@ -158,8 +80,9 @@ export default function SWMM5LegoBuilder() {
   const autoSaveTimer = useRef(null);
   const gridRef = useRef(null);
 
-  const save = useCallback(() => setHist(h => [...h.slice(-30), { grid: grid.map(r => [...r]), gridSize }]), [grid, gridSize]);
+  const save = useCallback(() => { setHist(h => [...h.slice(-30), { grid: grid.map(r => [...r]), gridSize }]); setFuture([]); }, [grid, gridSize]);
   const place = useCallback((r, c) => setGrid(p => { const n = p.map(x => [...x]); n[r][c] = erasing ? null : sel; return n; }), [sel, erasing]);
+  const jsonFileRef = useRef(null);
 
   useEffect(() => {
     const saved = loadFromLocalStorage();
@@ -169,30 +92,55 @@ export default function SWMM5LegoBuilder() {
       setGrid(saved.grid);
       if (saved.stormIdx !== undefined) setStormIdx(saved.stormIdx);
       if (saved.cellProps) setCellProps(saved.cellProps);
+      if (saved.wqConfig) setWqConfig(saved.wqConfig);
+      if (saved.cellSpacing !== undefined) setCellSpacing(saved.cellSpacing);
+      if (saved.evapRate !== undefined) setEvapRate(saved.evapRate);
+      if (saved.unitSystem) setUnitSystem(saved.unitSystem);
     }
   }, []);
 
   useEffect(() => {
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => {
-      saveToLocalStorage(grid, gridSize, stormIdx, cellProps);
+      saveToLocalStorage(grid, gridSize, stormIdx, cellProps, { wqConfig, cellSpacing, evapRate, unitSystem });
     }, 1000);
     return () => clearTimeout(autoSaveTimer.current);
-  }, [grid, gridSize, stormIdx, cellProps]);
+  }, [grid, gridSize, stormIdx, cellProps, wqConfig, cellSpacing, evapRate, unitSystem]);
 
   const SURFACE_KEYS = ["grass","roof","road","driveway","sidewalk","lid_pond","perm_pave","grn_roof","rain_brl","swale"];
   const NODE_KEYS = ["manhole","inlet","outfall","storage","divider"];
   const LINK_KEYS = ["pipe","channel","pump","orifice","weir"];
+
+  const doUndo = useCallback(() => {
+    if (hist.length) {
+      const entry = hist[hist.length - 1];
+      setFuture(f => [{ grid: grid.map(r => [...r]), gridSize }, ...f.slice(0, 30)]);
+      setGridGlobal(entry.gridSize); setGridSize(entry.gridSize); setGrid(entry.grid);
+      setHist(h => h.slice(0, -1));
+    }
+  }, [hist, grid, gridSize]);
+
+  const doRedo = useCallback(() => {
+    if (future.length) {
+      const entry = future[0];
+      setHist(h => [...h.slice(-30), { grid: grid.map(r => [...r]), gridSize }]);
+      setGridGlobal(entry.gridSize); setGridSize(entry.gridSize); setGrid(entry.grid);
+      setFuture(f => f.slice(1));
+    }
+  }, [future, grid, gridSize]);
+
+  const [focusCell, setFocusCell] = useState(null);
 
   useEffect(() => {
     const handler = (e) => {
       const tag = e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON" || tag === "A" || e.target.isContentEditable || e.target.getAttribute("role") === "button") return;
       if (e.ctrlKey || e.metaKey) {
-        if (e.key === "z" || e.key === "Z") {
-          e.preventDefault();
-          if (hist.length) { const entry = hist[hist.length-1]; setGridGlobal(entry.gridSize); setGridSize(entry.gridSize); setGrid(entry.grid); setHist(h => h.slice(0,-1)); }
-          return;
+        if ((e.key === "z" || e.key === "Z") && !e.shiftKey) {
+          e.preventDefault(); doUndo(); return;
+        }
+        if ((e.key === "z" && e.shiftKey) || e.key === "y" || e.key === "Y") {
+          e.preventDefault(); doRedo(); return;
         }
       }
       if (e.key === "Escape") {
@@ -202,6 +150,23 @@ export default function SWMM5LegoBuilder() {
       if (e.key === " ") { e.preventDefault(); setErasing(v => !v); return; }
       if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); setErasing(true); return; }
       if (e.key === "r" || e.key === "R") { if (!e.ctrlKey && !e.metaKey && !isRunning) { doRun(); } return; }
+      if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        setFocusCell(prev => {
+          const cr = prev || { r: 0, c: 0 };
+          let nr = cr.r, nc = cr.c;
+          if (e.key === "ArrowUp") nr = Math.max(0, cr.r - 1);
+          if (e.key === "ArrowDown") nr = Math.min(gridSize - 1, cr.r + 1);
+          if (e.key === "ArrowLeft") nc = Math.max(0, cr.c - 1);
+          if (e.key === "ArrowRight") nc = Math.min(gridSize - 1, cr.c + 1);
+          setInspCell({ r: nr, c: nc });
+          return { r: nr, c: nc };
+        });
+        return;
+      }
+      if (e.key === "Enter" && focusCell) {
+        e.preventDefault(); save(); place(focusCell.r, focusCell.c); return;
+      }
       const num = parseInt(e.key);
       if (!isNaN(num) && num >= 1 && num <= 9) {
         if (e.shiftKey) {
@@ -356,7 +321,7 @@ export default function SWMM5LegoBuilder() {
   const flowState = useMemo(() => {
     if (!simResult || simStep === 0) return {};
     const state = {};
-    simResult.conduits.forEach(cd => {
+    (simResult.allConduitLike || simResult.conduits).forEach(cd => {
       const h = cd.history[simStep];
       if (h) cd.pipes.forEach(p => { state[`${p.r}-${p.c}`] = { flow: Math.min(h.flow / 2, 1) }; });
     });
@@ -369,15 +334,43 @@ export default function SWMM5LegoBuilder() {
 
   const errCells = useMemo(() => validation?.errCells || new Set(), [validation]);
 
+  const workerRef = useRef(null);
   const doRun = () => {
     const v = validateModel(grid);
     setValidation(v);
     if (v.errors.length > 0) return;
-    const result = runSWMM5(grid, STORMS[stormIdx], cellProps);
-    if (!result) return;
-    setSimResult(result);
+    if (workerRef.current) workerRef.current.terminate();
+    const worker = new Worker(
+      new URL('../lib/simWorker.js', import.meta.url),
+      { type: 'module' }
+    );
+    workerRef.current = worker;
+    setSimResult(null);
     setSimStep(0);
-    setIsRunning(true);
+    worker.onmessage = (e) => {
+      if (e.data.type === 'result') {
+        if (e.data.data) {
+          setSimResult(e.data.data);
+          setSimStep(0);
+          setIsRunning(true);
+        }
+      } else if (e.data.type === 'error') {
+        console.error('Sim worker error:', e.data.message);
+      }
+      worker.terminate();
+      workerRef.current = null;
+    };
+    worker.onerror = (err) => {
+      console.error('Worker error, falling back to main thread:', err);
+      worker.terminate();
+      workerRef.current = null;
+      const result = runSWMM5(grid, STORMS[stormIdx], cellProps);
+      if (!result) return;
+      setSimResult(result);
+      setSimStep(0);
+      setIsRunning(true);
+    };
+    worker.postMessage({ grid, storm: STORMS[stormIdx], cellProps, gridSize });
   };
 
   const doStop = () => { setIsRunning(false); clearInterval(animRef.current); };
@@ -388,7 +381,7 @@ export default function SWMM5LegoBuilder() {
     setValidation(v);
     if (v.errors.length > 0) return;
     setInpText(exportINP(grid, STORMS[stormIdx], cellProps, {
-      waterQuality: wqConfig, cellSpacing, evapRate,
+      waterQuality: wqConfig, cellSpacing, evapRate, unitSystem,
     }));
     setShowInp(true);
   };
@@ -401,7 +394,7 @@ export default function SWMM5LegoBuilder() {
     setWasmRpt(null); setWasmParsed(null); setWasmBinaryResults(null);
     try {
       const inp = exportINP(grid, STORMS[stormIdx], cellProps, {
-        waterQuality: wqConfig, cellSpacing, evapRate,
+        waterQuality: wqConfig, cellSpacing, evapRate, unitSystem,
       });
       const { returnCode, rpt, outBinary } = await runSwmmWasm(inp);
       setWasmRpt(rpt);
@@ -460,127 +453,7 @@ export default function SWMM5LegoBuilder() {
     }}>
       <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700;800&family=Nunito:wght@400;700;800;900&display=swap" rel="stylesheet" />
 
-      {showTutorial && (() => {
-        const steps = [
-          { title: "🧱 Welcome to SWMM5 Lego Builder!", sub: "Build stormwater networks like LEGO — drag, drop, simulate!", icon: "🌧️",
-            body: "This is a browser-based SWMM5 model editor with a full JavaScript hydraulic engine. You can paint surfaces, place pipes and nodes, then run real-time simulations — all without installing EPA SWMM5.",
-            visual: [
-              { e: "🌱", l: "Grass", c: "#70C442" }, { e: "🏠", l: "Roof", c: "#FE8A18" }, { e: "🛣️", l: "Road", c: "#6C6E68" },
-              { e: "🔵", l: "Manhole", c: "#F2C717" }, { e: "🟫", l: "Pipe", c: "#5A93DB" }, { e: "🔴", l: "Outfall", c: "#D01012" },
-            ]},
-          { title: "🎨 Step 1: Paint Your Catchment", sub: "Select elements from the palette and paint on the grid", icon: "🖌️",
-            body: "LEFT PANEL: Click any element to select it. GRID: Click or drag to paint. Each surface type has real SWMM5 properties — Curve Number, Manning's n, depression storage. Grass (CN=39) absorbs rain; roads (CN=98) shed it immediately.",
-            tips: ["🌱 Grass: CN=39, lots of infiltration", "🏠 Roof: CN=98, 85% impervious", "🛣️ Road: CN=98, 95% impervious", "🌿 LID Pond: CN=65, bioretention", "🔲 Right-click or 🧹 Eraser to remove cells"] },
-          { title: "🔧 Step 2: Build the Pipe Network", sub: "Connect nodes with pipes to route collected water", icon: "🔗",
-            body: "Place manholes and inlets to collect surface runoff. Connect them with pipe cells. Water flows downhill — invert elevations are automatically computed from grid row (0.5 ft per row). The outfall is the discharge point where water exits the system.",
-            tips: ["⬇️ Inlet: Collects surface runoff (4 ft deep)", "🔵 Manhole: Junction point (6 ft deep)", "🔴 Outfall: Discharge boundary (FREE)", "🟫 Pipe: 18\" diameter, Manning's n=0.013", "⬇️ Water flows from top to bottom (higher inverts → lower)"] },
-          { title: "✅ Step 3: Validate & Fix", sub: "Check your model for errors before running", icon: "🛡️",
-            body: "Click ✅ Validate to check model integrity. Common errors: no outfall, disconnected pipes. Click 🔧 Fix to auto-repair — it will add missing outfalls and connect orphaned elements. Error cells flash red on the grid.",
-            tips: ["✅ Validates: outfall exists, pipes connected, surfaces drain", "🔧 Auto-fix: adds outfalls, connects pipes", "❌ Red border = error cell", "⚠️ Warnings don't block simulation"] },
-          { title: "🚀 Step 4: Run a Simulation!", sub: "Watch your network handle a design storm in real-time", icon: "⚡",
-            body: "Click 🚀 Quick Sim for an animated preview — it uses simplified SCS Curve Number infiltration and Manning's equations (not full SWMM). For real EPA SWMM5 results, use 🔬 EPA SWMM5 which runs the actual solver via WebAssembly.",
-            tips: ["🌧️ 49 design storms from 6 continents", "📊 Real-time hydrograph charts", "🔍 Click any cell for SWMM Inspector panel", "⏸️ Pause/resume animation anytime", "📈 System, subcatchment, pipe & node result tabs"] },
-          { title: "📦 Step 5: Export & Import", sub: "Take your model into EPA SWMM5 or bring one in", icon: "💾",
-            body: "📦 Export .inp generates a complete SWMM5 input file — runs directly in EPA SWMM5. 📂 Import .inp reads any standard SWMM5 file and maps it onto the grid. Load demos like Residential, Highway, Stadium, or School Campus to explore pre-built networks.",
-            tips: ["📦 Export: All SWMM5 sections ([JUNCTIONS], [CONDUITS], etc.)", "📂 Import: Reads coordinates, maps to 20×20 grid", `🎲 ${DEMOS.length} demo models ready to explore`, "🌧️ Selected storm exports with the model"] },
-        ];
-        const step = steps[tutStep];
-        const isLast = tutStep === steps.length - 1;
-        return (
-          <div style={{
-            position: "fixed", inset: 0, zIndex: 9999,
-            background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }} onClick={e => e.target === e.currentTarget && setShowTutorial(false)}>
-            <div style={{
-              width: "min(680px, 90vw)", background: "#F4F4F4",
-              borderRadius: 4, border: "4px solid #F2C717", padding: 0, overflow: "hidden",
-              boxShadow: "6px 6px 0 rgba(0,0,0,0.5), inset 0 0 0 2px rgba(255,255,255,0.8)",
-              color: "#1B2A34",
-            }}>
-              <div style={{ height: 6, background: "#E4CD9E" }}>
-                <div style={{
-                  height: "100%", borderRadius: 0, transition: "width 0.4s ease",
-                  width: `${((tutStep + 1) / steps.length) * 100}%`,
-                  background: "#D01012",
-                }} />
-              </div>
-
-              <div style={{ padding: "28px 32px 24px" }}>
-                <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-                  {steps.map((_, i) => (
-                    <div key={i} onClick={() => setTutStep(i)} style={{
-                      width: i === tutStep ? 32 : 12, height: 12, borderRadius: 3, cursor: "pointer",
-                      background: i === tutStep ? "#D01012" : i < tutStep ? "#4B9F4A" : "#E4CD9E",
-                      transition: "all 0.3s ease",
-                      boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.3), 1px 1px 0 rgba(0,0,0,0.2)",
-                    }} />
-                  ))}
-                </div>
-
-                <div style={{ fontSize: 48, marginBottom: 8 }}>{step.icon}</div>
-                <h2 style={{ fontSize: 24, fontWeight: 900, margin: "0 0 4px", color: "#D01012", fontFamily: "'Fredoka'", textShadow: "2px 2px 0 rgba(0,0,0,0.1)" }}>{step.title}</h2>
-                <p style={{ fontSize: 14, color: "#6C6E68", margin: "0 0 16px", fontStyle: "italic", fontWeight: 600 }}>{step.sub}</p>
-
-                <p style={{ fontSize: 13, color: "#1B2A34", lineHeight: 1.7, margin: "0 0 16px" }}>{step.body}</p>
-
-                {step.visual && (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-                    {step.visual.map((v, i) => (
-                      <div key={i} style={{
-                        display: "flex", alignItems: "center", gap: 6, padding: "6px 12px",
-                        background: "#fff", borderRadius: 4,
-                        border: "2px solid #E4CD9E",
-                        boxShadow: "2px 2px 0 rgba(0,0,0,0.15)",
-                      }}>
-                        <span style={{ fontSize: 20 }}>{v.e}</span>
-                        <span style={{ fontSize: 11, color: "#1B2A34", fontWeight: 800 }}>{v.l}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {step.tips && (
-                  <div style={{ background: "#fff", borderRadius: 4, padding: 12, marginBottom: 16, border: "2px solid #E4CD9E" }}>
-                    {step.tips.map((tip, i) => (
-                      <div key={i} style={{ fontSize: 11, color: "#1B2A34", padding: "4px 0", lineHeight: 1.5, fontWeight: 600 }}>{tip}</div>
-                    ))}
-                  </div>
-                )}
-
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-                  <button onClick={() => setShowTutorial(false)} style={{
-                    padding: "8px 16px", borderRadius: 4, border: "none",
-                    background: "#6C6E68", color: "#F4F4F4", cursor: "pointer",
-                    fontSize: 12, fontFamily: "'Fredoka'", fontWeight: 800,
-                    boxShadow: "inset 2px 2px 0 rgba(255,255,255,0.15), inset -2px -3px 0 rgba(0,0,0,0.20), 0 3px 0 rgba(0,0,0,0.35)",
-                  }}>Skip Tutorial</button>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    {tutStep > 0 && (
-                      <button onClick={() => setTutStep(s => s - 1)} style={{
-                        padding: "8px 20px", borderRadius: 4, border: "none",
-                        background: "#9BA19D", color: "#F4F4F4", cursor: "pointer",
-                        fontSize: 12, fontFamily: "'Fredoka'", fontWeight: 800,
-                        boxShadow: "inset 2px 2px 0 rgba(255,255,255,0.15), inset -2px -3px 0 rgba(0,0,0,0.20), 0 3px 0 rgba(0,0,0,0.35)",
-                      }}>← Back</button>
-                    )}
-                    <button onClick={() => {
-                      if (isLast) { setShowTutorial(false); }
-                      else setTutStep(s => s + 1);
-                    }} style={{
-                      padding: "8px 24px", borderRadius: 4, border: "none",
-                      background: isLast ? "#4B9F4A" : "#D01012",
-                      color: "#F4F4F4", cursor: "pointer",
-                      fontSize: 13, fontFamily: "'Fredoka'", fontWeight: 900,
-                      boxShadow: "inset 2px 2px 0 rgba(255,255,255,0.25), inset -2px -3px 0 rgba(0,0,0,0.20), 0 4px 0 rgba(0,0,0,0.35)",
-                    }}>{isLast ? "🚀 Start Building!" : `Next → (${tutStep + 1}/${steps.length})`}</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {showTutorial && <Tutorial onClose={() => setShowTutorial(false)} />}
 
       <div style={{ textAlign: "center", marginBottom: 8, position: "relative" }}>
         <h1 style={{
@@ -593,7 +466,7 @@ export default function SWMM5LegoBuilder() {
         <p style={{ fontSize: isMobile ? 9 : 11, color: "#9BA19D", margin: "2px 0 0", fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
           Build • Validate • Simulate • Export
         </p>
-        <button onClick={() => { setShowTutorial(true); setTutStep(0); }} title="Show tutorial" style={{
+        <button onClick={() => setShowTutorial(true)} title="Show tutorial" style={{
           position: "absolute", top: 2, right: 0, width: 30, height: 30, borderRadius: 4,
           border: "none", background: "#F2C717", color: "#1B2A34",
           fontSize: 14, fontWeight: 900, cursor: "pointer",
@@ -726,6 +599,7 @@ export default function SWMM5LegoBuilder() {
             <div style={{ fontSize: 8, color: "#4A4C47", lineHeight: 1.8, fontWeight: 600, fontFamily: "'Fredoka'" }}>
               {[
                 ["Ctrl+Z", "Undo"],
+                ["Ctrl+Shift+Z", "Redo"],
                 ["Space", "Toggle Paint/Erase"],
                 ["Del", "Erase mode"],
                 ["R", "Run simulation"],
@@ -733,6 +607,8 @@ export default function SWMM5LegoBuilder() {
                 ["1-9", "Select surface"],
                 ["Shift+1-5", "Select node"],
                 ["Q/W/E", "Pipe/Channel/Pump"],
+                ["Arrow Keys", "Navigate grid"],
+                ["Enter", "Place element"],
               ].map(([k, v]) => (
                 <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ background: "#E0E0E0", borderRadius: 2, padding: "0 4px", fontWeight: 800, fontSize: 7, color: "#1B2A34", border: "1px solid #bbb", boxShadow: "0 1px 0 #999" }}>{k}</span>
@@ -748,7 +624,8 @@ export default function SWMM5LegoBuilder() {
           <div className="lego-toolbar">
             <div style={{ display: "flex", gap: 5, justifyContent: "center", flexWrap: "wrap", alignItems: "center", width: "100%" }}>
               {[
-                { l: "↩ UNDO", fn: () => { if (hist.length) { const entry = hist[hist.length-1]; setGridGlobal(entry.gridSize); setGridSize(entry.gridSize); setGrid(entry.grid); setHist(h => h.slice(0,-1)); } }, color: "yellow", tip: "Undo last grid change [Ctrl+Z]" },
+                { l: "↩ UNDO", fn: doUndo, color: "yellow", tip: "Undo last grid change [Ctrl+Z]" },
+                { l: "↪ REDO", fn: doRedo, color: "yellow", tip: "Redo [Ctrl+Shift+Z / Ctrl+Y]" },
                 { l: "🗑️ CLEAR", fn: () => { save(); setGrid(emptyGrid(gridSize)); doReset(); }, color: "red", tip: "Clear entire grid and reset simulation" },
                 { l: "🎲 DEMOS", fn: () => setShowDemos(s => !s), color: "orange", tip: "Load a pre-built demo model" },
                 { sep: true },
@@ -785,8 +662,50 @@ export default function SWMM5LegoBuilder() {
               <button className="lego-btn sm" data-color={showAdvanced ? "blue" : "white"}
                 onClick={() => setShowAdvanced(s => !s)}
                 title="Advanced simulation settings (cell spacing, evaporation)">⚙️</button>
+              <button className="lego-btn sm" data-color={unitSystem === "si" ? "green" : "white"}
+                onClick={() => setUnitSystem(u => u === "us" ? "si" : "us")}
+                title={`Toggle units: ${UNIT_SYSTEMS[unitSystem].label}`}>
+                {unitSystem === "us" ? "🇺🇸 US" : "🌐 SI"}
+              </button>
+              <span className="separator" />
+              <button className="lego-btn sm" data-color="green"
+                onClick={() => {
+                  const json = exportModelJSON(grid, gridSize, stormIdx, cellProps, { wqConfig, cellSpacing, evapRate, unitSystem });
+                  const b = new Blob([json], { type: "application/json" });
+                  const a = document.createElement("a"); a.href = URL.createObjectURL(b);
+                  a.download = "swmm5_lego_model.json"; a.click(); URL.revokeObjectURL(a.href);
+                }}
+                title="Download model as JSON file">📥 JSON</button>
+              <button className="lego-btn sm" data-color="blue"
+                onClick={() => jsonFileRef.current?.click()}
+                title="Load model from JSON file">📤 Load</button>
             </div>
             <input ref={fileRef} type="file" accept=".inp,.txt" onChange={doImport} style={{ display: "none" }} />
+            <input ref={jsonFileRef} type="file" accept=".json" onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (ev) => {
+                try {
+                  const data = importModelJSON(ev.target.result);
+                  save();
+                  if (data.gridSize) { setGridGlobal(data.gridSize); setGridSize(data.gridSize); }
+                  setGrid(data.grid);
+                  if (data.stormIdx !== undefined) setStormIdx(data.stormIdx);
+                  if (data.cellProps) setCellProps(data.cellProps); else setCellProps({});
+                  if (data.wqConfig) setWqConfig(data.wqConfig);
+                  if (data.cellSpacing !== undefined) setCellSpacing(data.cellSpacing);
+                  if (data.evapRate !== undefined) setEvapRate(data.evapRate);
+                  if (data.unitSystem) setUnitSystem(data.unitSystem);
+                  doReset(); setValidation(null);
+                  setFixLog([`📂 Loaded JSON: ${file.name}`, `📐 Grid: ${data.gridSize}×${data.gridSize}`]);
+                } catch (err) {
+                  setFixLog([`❌ JSON load error: ${err.message}`]);
+                }
+              };
+              reader.readAsText(file);
+              e.target.value = "";
+            }} style={{ display: "none" }} />
             <input ref={bgFileRef} type="file" accept="image/*" onChange={(e) => {
               const file = e.target.files?.[0];
               if (!file) return;
@@ -999,7 +918,7 @@ export default function SWMM5LegoBuilder() {
                 <div key={r} style={{ display: "flex", position: "relative", zIndex: 1 }}>
                   {row.map((cell, c) => (
                     <div key={c}
-                      onMouseDown={e => { e.preventDefault(); setPainting(true); save(); place(r, c); setInspCell({r, c}); }}
+                      onMouseDown={e => { e.preventDefault(); setPainting(true); save(); place(r, c); setInspCell({r, c}); setFocusCell({r, c}); }}
                       onMouseEnter={() => { setHov(`${r}-${c}`); if (painting) place(r, c); }}
                       onMouseLeave={() => setHov(null)}
                       onContextMenu={e => {
@@ -1008,6 +927,7 @@ export default function SWMM5LegoBuilder() {
                           setCtxMenu({ r, c, x: e.clientX, y: e.clientY });
                         }
                       }}
+                      style={focusCell?.r === r && focusCell?.c === c ? { outline: "2px solid #F2C717", outlineOffset: -1, zIndex: 5, position: "relative" } : undefined}
                     >
                       <GridCell
                         element={cell} isHov={hov === `${r}-${c}`}
@@ -1035,7 +955,7 @@ export default function SWMM5LegoBuilder() {
             if (simResult) {
               const nd = simResult.allNodes.find(n => n.r === r && n.c === c);
               if (nd && nd.history[simStep]) simData = { type: "node", ...nd.history[simStep], id: nd.id, maxD: nd.maxDepth };
-              const cd = simResult.conduits.find(cn => cn.pipes.some(p => p.r === r && p.c === c));
+              const cd = (simResult.allConduitLike || simResult.conduits).find(cn => cn.pipes.some(p => p.r === r && p.c === c));
               if (cd && cd.history[simStep]) simData = { type: "pipe", ...cd.history[simStep], id: cd.id };
               const sc = simResult.subcatchments.find(s => s.cells.some(cl => cl.r === r && cl.c === c));
               if (sc && sc.history[simStep]) simData = { type: "subcatch", ...sc.history[simStep], id: sc.id, area: sc.area_ac, cn: sc.cn, pctI: sc.pctImperv };
@@ -1194,20 +1114,63 @@ export default function SWMM5LegoBuilder() {
           {validation && (validation.errors.length > 0 || validation.warnings.length > 0) && (
             <div style={{
               background: "#F4F4F4", borderRadius: 4, padding: 10, boxShadow: "4px 4px 0 rgba(0,0,0,0.4)", color: "#1B2A34",
-              border: `2px solid ${validation.errors.length > 0 ? "#ef444466" : "#fbbf2444"}`,
+              border: `3px solid ${validation.errors.length > 0 ? "#D01012" : "#F2C717"}`,
             }}>
-              {validation.errors.map((e, i) => (
-                <div key={`e${i}`} style={{ fontSize: 10, color: "#fca5a5", padding: "3px 0" }}>🚫 {e}</div>
-              ))}
-              {validation.warnings.map((w, i) => (
-                <div key={`w${i}`} style={{ fontSize: 10, color: "#F2C717", padding: "3px 0" }}>⚠️ {w}</div>
-              ))}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 900, color: validation.errors.length > 0 ? "#D01012" : "#F2C717", fontFamily: "'Fredoka'" }}>
+                  {validation.errors.length > 0 ? `🚫 ${validation.errors.length} Error${validation.errors.length > 1 ? "s" : ""}` : ""}
+                  {validation.errors.length > 0 && validation.warnings.length > 0 ? " • " : ""}
+                  {validation.warnings.length > 0 ? `⚠️ ${validation.warnings.length} Warning${validation.warnings.length > 1 ? "s" : ""}` : ""}
+                </span>
+                <button onClick={() => setValidation(null)} style={{
+                  background: "#6C6E68", color: "#F4F4F4", border: "none", borderRadius: 3,
+                  padding: "2px 8px", cursor: "pointer", fontSize: 10, fontWeight: 800,
+                }}>✕</button>
+              </div>
+              {validation.errors.map((e, i) => {
+                const cellMatch = e.match(/\((\d+)[,\s]+(\d+)\)/);
+                return (
+                  <div key={`e${i}`} style={{
+                    fontSize: 10, color: "#D01012", padding: "3px 6px", marginBottom: 2, borderRadius: 3,
+                    background: "#FEE2E2", cursor: cellMatch ? "pointer" : "default",
+                  }} onClick={() => {
+                    if (cellMatch) {
+                      const cr = { r: parseInt(cellMatch[1]), c: parseInt(cellMatch[2]) };
+                      setFocusCell(cr); setInspCell(cr);
+                    }
+                  }}>
+                    🚫 {e} {cellMatch && <span style={{ fontSize: 8, color: "#6C6E68" }}>(click to locate)</span>}
+                  </div>
+                );
+              })}
+              {validation.warnings.map((w, i) => {
+                const cellMatch = w.match(/\((\d+)[,\s]+(\d+)\)/);
+                return (
+                  <div key={`w${i}`} style={{
+                    fontSize: 10, color: "#92400E", padding: "3px 6px", marginBottom: 2, borderRadius: 3,
+                    background: "#FEF3C7", cursor: cellMatch ? "pointer" : "default",
+                  }} onClick={() => {
+                    if (cellMatch) {
+                      const cr = { r: parseInt(cellMatch[1]), c: parseInt(cellMatch[2]) };
+                      setFocusCell(cr); setInspCell(cr);
+                    }
+                  }}>
+                    ⚠️ {w} {cellMatch && <span style={{ fontSize: 8, color: "#6C6E68" }}>(click to locate)</span>}
+                  </div>
+                );
+              })}
               {validation.errors.length > 0 && (
                 <button onClick={doFix} style={{
-                  marginTop: 6, padding: "6px 16px", borderRadius: 8, border: "2px solid #fbbf24",
-                  background: "rgba(251,191,36,0.1)", color: "#F2C717", cursor: "pointer",
-                  fontSize: 11, fontWeight: 800, fontFamily: "'Fredoka', sans-serif", width: "100%",
+                  marginTop: 6, padding: "6px 16px", borderRadius: 4, border: "none",
+                  background: "#F2C717", color: "#1B2A34", cursor: "pointer",
+                  fontSize: 11, fontWeight: 900, fontFamily: "'Fredoka', sans-serif", width: "100%",
+                  boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.3), 0 2px 0 rgba(0,0,0,0.3)",
                 }}>🔧 Auto-Fix Model</button>
+              )}
+              {validation.errors.length === 0 && validation.warnings.length === 0 && (
+                <div style={{ fontSize: 11, color: "#4B9F4A", fontWeight: 800, textAlign: "center", padding: 4 }}>
+                  ✅ Model is valid — ready to simulate!
+                </div>
               )}
               {fixLog.map((f, i) => <div key={i} style={{ fontSize: 9, color: "#70C442", marginTop: 3 }}>✓ {f}</div>)}
             </div>
@@ -2258,7 +2221,16 @@ export default function SWMM5LegoBuilder() {
         const key = `${r}-${c}`;
         const ov = cellProps[key] || {};
         const fields = [];
+        const availableNodes = [];
         if (el.cat === "surface") {
+          for (let nr = 0; nr < gridSize; nr++) {
+            for (let nc = 0; nc < gridSize; nc++) {
+              const nEl = grid[nr]?.[nc];
+              if (nEl && EL[nEl]?.cat === "node") {
+                availableNodes.push({ id: `${nEl}_${nr}_${nc}`, label: `${EL[nEl].e} ${EL[nEl].lbl} (${nr},${nc})`, r: nr, c: nc });
+              }
+            }
+          }
           fields.push({ k: "cn", label: "Curve Number", min: 30, max: 100, step: 1, def: el.cn });
           fields.push({ k: "pI", label: "% Impervious", min: 0, max: 100, step: 1, def: el.pI });
           fields.push({ k: "nI", label: "n-Imperv", min: 0.001, max: 0.5, step: 0.001, def: el.nI });
@@ -2288,6 +2260,31 @@ export default function SWMM5LegoBuilder() {
                 padding: "2px 8px", cursor: "pointer", fontSize: 10, fontWeight: 800,
               }}>x</button>
             </div>
+            {availableNodes.length > 0 && el.cat === "surface" && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", borderBottom: "1px dotted #ccc" }}>
+                <span style={{ fontSize: 10, color: "#1B2A34", fontWeight: 600 }}>Outlet Node</span>
+                <select
+                  value={ov.outletNode || ""}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setCellProps(prev => ({
+                      ...prev,
+                      [key]: { ...prev[key], outletNode: val || undefined },
+                    }));
+                  }}
+                  style={{
+                    width: 120, padding: "2px 4px", borderRadius: 3,
+                    border: "2px solid #E4CD9E", fontSize: 9, fontWeight: 700, fontFamily: "'Fredoka', sans-serif",
+                    background: ov.outletNode ? "#FFF8DC" : "#fff",
+                  }}
+                >
+                  <option value="">Auto (nearest)</option>
+                  {availableNodes.map(n => (
+                    <option key={n.id} value={n.id}>{n.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             {fields.map(f => (
               <div key={f.k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", borderBottom: "1px dotted #ccc" }}>
                 <span style={{ fontSize: 10, color: "#1B2A34", fontWeight: 600 }}>{f.label}</span>
@@ -2347,7 +2344,7 @@ export default function SWMM5LegoBuilder() {
             />
             <button onClick={() => {
               if (!saveName.trim()) return;
-              saveToSlot(saveName.trim(), grid, gridSize, stormIdx, cellProps);
+              saveToSlot(saveName.trim(), grid, gridSize, stormIdx, cellProps, { wqConfig, cellSpacing, evapRate, unitSystem });
               setSaveSlots(getSaveSlots());
               setSaveName("");
             }} style={{
@@ -2381,6 +2378,10 @@ export default function SWMM5LegoBuilder() {
                   setGrid(slot.grid);
                   if (slot.stormIdx !== undefined) setStormIdx(slot.stormIdx);
                   if (slot.cellProps) setCellProps(slot.cellProps); else setCellProps({});
+                  if (slot.wqConfig) setWqConfig(slot.wqConfig);
+                  if (slot.cellSpacing !== undefined) setCellSpacing(slot.cellSpacing);
+                  if (slot.evapRate !== undefined) setEvapRate(slot.evapRate);
+                  if (slot.unitSystem) setUnitSystem(slot.unitSystem);
                   doReset();
                   setShowSavePanel(false);
                 }} style={{

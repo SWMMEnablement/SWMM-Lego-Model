@@ -9,6 +9,8 @@ export function exportINP(grid, storm, cellProps, options = {}) {
   const endHr = Math.ceil(totalMin / 60);
   const cellSpc = options.cellSpacing || SPC;
   const spcRatio = cellSpc / SPC;
+  const unitSys = options.unitSystem || "us";
+  const flowUnits = unitSys === "si" ? "CMS" : "CFS";
   let inp = "";
   const ln = (s="") => { inp += s + "\n"; };
 
@@ -35,7 +37,7 @@ export function exportINP(grid, storm, cellProps, options = {}) {
   ln();
 
   ln("[OPTIONS]");
-  ln("FLOW_UNITS           CFS"); ln("INFILTRATION         CURVE_NUMBER"); ln("FLOW_ROUTING         DYNWAVE");
+  ln(`FLOW_UNITS           ${flowUnits}`); ln("INFILTRATION         CURVE_NUMBER"); ln("FLOW_ROUTING         DYNWAVE");
   ln("LINK_OFFSETS          DEPTH"); ln("ALLOW_PONDING        YES");
   ln(`START_DATE           ${startDate}`); ln("START_TIME           00:00:00");
   ln(`END_DATE             ${endDate}`); ln(`END_TIME             ${endTime}`);
@@ -89,16 +91,26 @@ export function exportINP(grid, storm, cellProps, options = {}) {
 
   ln("[JUNCTIONS]");
   ln(";;Name           Elevation  MaxDepth   InitDepth  SurDepth   Aponded");
-  model.nodes.forEach(n => { ln(`${n.id.padEnd(17)}${n.invert.toFixed(2).padStart(10)} ${(n.maxDepth||6).toString().padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)}`); }); ln();
+  (model.junctions || model.nodes.filter(n => !n.isStorage && !n.isDivider)).forEach(n => {
+    ln(`${n.id.padEnd(17)}${n.invert.toFixed(2).padStart(10)} ${(n.maxDepth||6).toString().padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)}`);
+  }); ln();
 
   ln("[OUTFALLS]");
   model.outfalls.forEach(o => { ln(`${o.id.padEnd(17)}${o.invert.toFixed(2).padStart(10)} FREE                                  NO`); }); ln();
 
   if (model.storage && model.storage.length > 0) {
     ln("[STORAGE]");
-    ln(";;Name           Elev       MaxDepth   InitDepth  Shape    Curve Name/Params            Ponded  Evap  Seep");
+    ln(";;Name           Elev       MaxDepth   InitDepth  Shape      Curve Name/Params            Ponded  Evap  Seep");
     model.storage.forEach(s => {
-      ln(`${s.id.padEnd(17)}${s.invert.toFixed(2).padStart(10)} ${(s.maxDepth||10).toString().padStart(10)} ${"0".padStart(10)} TABULAR    *                            ${"0".padStart(8)} ${"0".padStart(5)} ${"0".padStart(5)}`);
+      ln(`${s.id.padEnd(17)}${s.invert.toFixed(2).padStart(10)} ${(s.maxDepth||10).toString().padStart(10)} ${"0".padStart(10)} FUNCTIONAL 1000       0          0          ${"0".padStart(8)} ${"0".padStart(5)} ${"0".padStart(5)}`);
+    }); ln();
+  }
+
+  if (model.dividers && model.dividers.length > 0) {
+    ln("[DIVIDERS]");
+    ln(";;Name           Elevation  Diverted Link     Type       Parameters");
+    model.dividers.forEach(d => {
+      ln(`${d.id.padEnd(17)}${d.invert.toFixed(2).padStart(10)} *                OVERFLOW`);
     }); ln();
   }
 
@@ -108,8 +120,39 @@ export function exportINP(grid, storm, cellProps, options = {}) {
     ln(`${cd.id.padEnd(17)}${cd.from.id.padEnd(17)}${cd.to.id.padEnd(17)}${scaledLen.toFixed(0).padStart(10)} ${cd.n.toFixed(4).padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)}`);
   }); ln();
 
+  if (model.pumps && model.pumps.length > 0) {
+    ln("[PUMPS]");
+    ln(";;Name           From Node        To Node          Pump Curve       Status   Startup  Shutoff");
+    model.pumps.forEach(p => {
+      ln(`${p.id.padEnd(17)}${p.from.id.padEnd(17)}${p.to.id.padEnd(17)}*                ON       ${"0".padStart(8)} ${"0".padStart(8)}`);
+    }); ln();
+  }
+
+  if (model.orifices && model.orifices.length > 0) {
+    ln("[ORIFICES]");
+    ln(";;Name           From Node        To Node          Type         Offset     Qcoeff     Gated    CloseTime");
+    model.orifices.forEach(o => {
+      ln(`${o.id.padEnd(17)}${o.from.id.padEnd(17)}${o.to.id.padEnd(17)}SIDE         ${"0".padStart(10)} ${(0.65).toFixed(4).padStart(10)} NO       ${"0".padStart(10)}`);
+    }); ln();
+  }
+
+  if (model.weirs && model.weirs.length > 0) {
+    ln("[WEIRS]");
+    ln(";;Name           From Node        To Node          Type         CrestHt    Qcoeff     Gated    EndCon   EndCoeff   Surcharge");
+    model.weirs.forEach(w => {
+      ln(`${w.id.padEnd(17)}${w.from.id.padEnd(17)}${w.to.id.padEnd(17)}TRANSVERSE   ${"0".padStart(10)} ${(3.33).toFixed(2).padStart(10)} NO       ${"0".padStart(8)} ${"0".padStart(10)} YES`);
+    }); ln();
+  }
+
   ln("[XSECTIONS]");
-  model.conduits.forEach(cd => { ln(`${cd.id.padEnd(17)}CIRCULAR     ${cd.diam.toFixed(1).padStart(16)} ${"0".padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"1".padStart(10)}`); }); ln();
+  model.conduits.forEach(cd => { ln(`${cd.id.padEnd(17)}CIRCULAR     ${cd.diam.toFixed(1).padStart(16)} ${"0".padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"1".padStart(10)}`); });
+  if (model.orifices) {
+    model.orifices.forEach(o => { ln(`${o.id.padEnd(17)}CIRCULAR     ${o.diam.toFixed(1).padStart(16)} ${"0".padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"1".padStart(10)}`); });
+  }
+  if (model.weirs) {
+    model.weirs.forEach(w => { ln(`${w.id.padEnd(17)}RECT_OPEN    ${w.diam.toFixed(1).padStart(16)} ${(w.diam * 0.5).toFixed(1).padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"1".padStart(10)}`); });
+  }
+  ln();
 
   if (wq.enabled) {
     const selPolls = POLLUTANTS.filter(p => wq.selectedPollutants.includes(p.id));

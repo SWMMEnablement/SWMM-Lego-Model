@@ -29,7 +29,9 @@ export function manningPipe(depth_ft, diam_ft, slope, n) {
 
 export function buildModel(grid, cellProps) {
   const GRID = getGrid();
-  const nodes = [], outfalls = [], conduits = [], subcatchments = [];
+  const junctions = [], outfalls = [], storage = [], dividers = [];
+  const conduits = [], pumps = [], orifices = [], weirs = [];
+  const subcatchments = [];
   const nodeMap = {};
 
   for (let r = 0; r < GRID; r++) {
@@ -43,13 +45,16 @@ export function buildModel(grid, cellProps) {
       const cp = cellProps || {};
       const nodeOv = cp[`${r},${c}`] || cp[`${r}-${c}`];
       const maxDepth = nodeOv?.maxD !== undefined ? nodeOv.maxD : (def.maxD || 0);
-      const nd = { id, r, c, type: el, invert, maxDepth, depth: 0, volume: 0, inflow: 0, outflow: 0, head: invert, isOutfall: el === "outfall", lateralInflow: 0, history: [] };
+      const nd = { id, r, c, type: el, invert, maxDepth, depth: 0, volume: 0, inflow: 0, outflow: 0, head: invert, isOutfall: el === "outfall", isStorage: el === "storage", isDivider: el === "divider", lateralInflow: 0, history: [] };
       if (el === "outfall") outfalls.push(nd);
-      else nodes.push(nd);
+      else if (el === "storage") storage.push(nd);
+      else if (el === "divider") dividers.push(nd);
+      else junctions.push(nd);
       nodeMap[`${r},${c}`] = nd;
     }
   }
 
+  const nodes = [...junctions, ...storage, ...dividers];
   const allNodes = [...nodes, ...outfalls];
 
   const visited = new Set();
@@ -92,11 +97,15 @@ export function buildModel(grid, cellProps) {
           if (ov?.diam !== undefined) linkDiam = ov.diam;
           if (ov?.mann !== undefined) linkN = ov.mann;
         }
-        conduits.push({
+        const linkObj = {
           id: `C_${pipes[0].r}_${pipes[0].c}`, from, to, linkType: linkType || "pipe",
           length, slope, diam: linkDiam, n: linkN,
           depth: 0, flow: 0, velocity: 0, pipes, history: [],
-        });
+        };
+        if (linkType === "pump") pumps.push(linkObj);
+        else if (linkType === "orifice") orifices.push(linkObj);
+        else if (linkType === "weir") weirs.push(linkObj);
+        else conduits.push(linkObj);
       }
     }
   }
@@ -129,13 +138,29 @@ export function buildModel(grid, cellProps) {
       scIdx++;
       const centR = cells.reduce((s, c2) => s + c2.r, 0) / cells.length;
       const centC = cells.reduce((s, c2) => s + c2.c, 0) / cells.length;
-      let nearest = allNodes[0], minD = Infinity;
-      allNodes.forEach(n => {
-        const d = Math.abs(n.r - centR) + Math.abs(n.c - centC);
-        if (d < minD) { minD = d; nearest = n; }
-      });
-      let totI = 0, totCN = 0;
       const cp = cellProps || {};
+      let nearest = allNodes[0], minD = Infinity;
+      let outletOverride = null;
+      for (const cl of cells) {
+        const ov = cp[`${cl.r}-${cl.c}`];
+        if (ov?.outletNode) { outletOverride = ov.outletNode; break; }
+      }
+      if (outletOverride) {
+        const overrideNode = allNodes.find(n => n.id === outletOverride);
+        if (overrideNode) nearest = overrideNode;
+        else {
+          allNodes.forEach(n => {
+            const d = Math.abs(n.r - centR) + Math.abs(n.c - centC);
+            if (d < minD) { minD = d; nearest = n; }
+          });
+        }
+      } else {
+        allNodes.forEach(n => {
+          const d = Math.abs(n.r - centR) + Math.abs(n.c - centC);
+          if (d < minD) { minD = d; nearest = n; }
+        });
+      }
+      let totI = 0, totCN = 0;
       cells.forEach(cl => {
         const d = EL[cl.type];
         const ov = cp[`${cl.r}-${cl.c}`];
@@ -165,7 +190,8 @@ export function buildModel(grid, cellProps) {
     }
   }
 
-  return { nodes, outfalls, allNodes, conduits, subcatchments };
+  const allConduitLike = [...conduits, ...pumps, ...orifices, ...weirs];
+  return { nodes, junctions, outfalls, storage, dividers, allNodes, conduits, pumps, orifices, weirs, allConduitLike, subcatchments };
 }
 
 export function runSWMM5(grid, storm, cellProps) {
@@ -219,18 +245,36 @@ export function runSWMM5(grid, storm, cellProps) {
 
     model.allNodes.forEach(n => { n.inflow = n.lateralInflow; n.lateralInflow = 0; });
 
-    model.conduits.forEach(cd => {
+    model.allConduitLike.forEach(cd => {
       const fromNode = cd.from;
       const toNode = cd.to;
 
       const h_up = fromNode.invert + fromNode.depth;
       const h_dn = toNode.isOutfall ? toNode.invert : toNode.invert + toNode.depth;
       const dh = h_up - h_dn;
-      const slope_eff = Math.max(dh / cd.length, 0.0001);
 
-      const pipeDepth = Math.min(fromNode.depth, cd.diam);
-      cd.flow = manningPipe(pipeDepth, cd.diam, slope_eff, cd.n);
-      cd.depth = pipeDepth;
+      if (cd.linkType === "pump") {
+        const pumpCap = cd.diam * cd.diam * 2;
+        cd.flow = dh > 0 || fromNode.depth > 0.1 ? Math.min(pumpCap, fromNode.depth * 12.566 / DT_ROUTE) : 0;
+        cd.depth = fromNode.depth > 0 ? cd.diam : 0;
+      } else if (cd.linkType === "orifice") {
+        const Cd = 0.65;
+        const area = Math.PI * cd.diam * cd.diam / 4;
+        const head = Math.max(fromNode.depth - (cd.diam / 2), 0);
+        cd.flow = head > 0 ? Cd * area * Math.sqrt(2 * 32.174 * head) : 0;
+        cd.depth = Math.min(fromNode.depth, cd.diam);
+      } else if (cd.linkType === "weir") {
+        const Cd = 3.33;
+        const weirLen = cd.diam;
+        const head = Math.max(fromNode.depth - (cd.diam * 0.5), 0);
+        cd.flow = head > 0 ? Cd * weirLen * Math.pow(head, 1.5) : 0;
+        cd.depth = Math.min(head, cd.diam);
+      } else {
+        const slope_eff = Math.max(dh / cd.length, 0.0001);
+        const pipeDepth = Math.min(fromNode.depth, cd.diam);
+        cd.flow = manningPipe(pipeDepth, cd.diam, slope_eff, cd.n);
+        cd.depth = pipeDepth;
+      }
 
       const maxVol = fromNode.depth * 12.566;
       const maxFlow = maxVol / DT_ROUTE;
@@ -263,7 +307,7 @@ export function runSWMM5(grid, storm, cellProps) {
     });
 
     const totalNodeDepth = model.nodes.reduce((s, n) => s + n.depth, 0);
-    const totalPipeFlow = model.conduits.reduce((s, c) => s + c.flow, 0);
+    const totalPipeFlow = model.allConduitLike.reduce((s, c) => s + c.flow, 0);
     const outfallFlow = model.outfalls.reduce((s, o) => s + (o.history[o.history.length-1]?.inflow || 0), 0);
 
     systemHistory.push({
