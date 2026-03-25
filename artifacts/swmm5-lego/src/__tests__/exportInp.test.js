@@ -72,4 +72,84 @@ describe('exportINP', () => {
       expect(parts.length).toBeGreaterThanOrEqual(7);
     });
   });
+
+  it('includes [LOSSES] section when conduits are present', () => {
+    const grid = emptyGrid(5);
+    grid[1][1] = 'manhole';
+    grid[1][2] = 'pipe';
+    grid[1][3] = 'outfall';
+    const inp = exportINP(grid, storm, {});
+    expect(inp).toContain('[LOSSES]');
+  });
+
+  it('includes [CURVES] section when pump is present', () => {
+    const grid = emptyGrid(5);
+    grid[1][1] = 'manhole';
+    grid[1][2] = 'pump';
+    grid[1][3] = 'outfall';
+    const inp = exportINP(grid, storm, {});
+    expect(inp).toContain('[CURVES]');
+  });
+
+  it('includes [MAP] section', () => {
+    const grid = emptyGrid(5);
+    grid[1][1] = 'manhole';
+    grid[1][2] = 'pipe';
+    grid[1][3] = 'outfall';
+    const inp = exportINP(grid, storm, {});
+    expect(inp).toContain('[MAP]');
+  });
+
+  it('includes [TAGS] section when nodes exist', () => {
+    const grid = emptyGrid(5);
+    grid[0][0] = 'grass';
+    grid[1][1] = 'manhole';
+    grid[1][2] = 'pipe';
+    grid[1][3] = 'outfall';
+    const inp = exportINP(grid, storm, {});
+    expect(inp).toContain('[TAGS]');
+  });
+
+  it('uses cellProps diameter in XSECTIONS', () => {
+    const grid = emptyGrid(5);
+    grid[1][1] = 'manhole';
+    grid[1][2] = 'pipe';
+    grid[1][3] = 'outfall';
+    const cellProps = { '1-2': { diam: 3.5 } };
+    const inp = exportINP(grid, storm, cellProps);
+    expect(inp).toContain('3.5');
+  });
+
+  it('uses cellProps loss coefficients in LOSSES', () => {
+    const grid = emptyGrid(5);
+    grid[1][1] = 'manhole';
+    grid[1][2] = 'pipe';
+    grid[1][3] = 'outfall';
+    const cellProps = { '1-2': { kEntry: 0.8, kExit: 1.2 } };
+    const inp = exportINP(grid, storm, cellProps);
+    expect(inp).toContain('[LOSSES]');
+    expect(inp).toContain('0.8');
+    expect(inp).toContain('1.2');
+  });
+
+  it('includes TRAPEZOIDAL cross-section from cellProps', () => {
+    const grid = emptyGrid(5);
+    grid[1][1] = 'manhole';
+    grid[1][2] = 'pipe';
+    grid[1][3] = 'outfall';
+    const cellProps = { '1-2': { xsecShape: 'TRAPEZOIDAL', diam: 3.0, xsecWidth: 5.0 } };
+    const inp = exportINP(grid, storm, cellProps);
+    expect(inp).toContain('TRAPEZOIDAL');
+  });
+
+  it('includes divider node in output', () => {
+    const grid = emptyGrid(5);
+    grid[1][0] = 'manhole';
+    grid[1][1] = 'pipe';
+    grid[1][2] = 'divider';
+    grid[1][3] = 'pipe';
+    grid[1][4] = 'outfall';
+    const inp = exportINP(grid, storm, {});
+    expect(inp).toContain('[DIVIDERS]');
+  });
 });

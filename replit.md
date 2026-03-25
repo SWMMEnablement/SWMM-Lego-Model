@@ -1,189 +1,62 @@
 # Workspace
 
 ## Overview
+This project is a pnpm workspace monorepo using TypeScript, designed for building and managing modern web applications. The core focus is on a powerful, interactive stormwater management model builder (`SWMM5 Lego Builder`) and a robust `Express API server`. The project aims to provide an intuitive platform for environmental engineering, leveraging both simplified and professional-grade simulation engines. The business vision is to democratize access to complex hydraulic modeling, enabling faster iteration and better understanding of stormwater systems.
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+## User Preferences
+- I prefer clear and concise explanations.
+- I appreciate modular and well-structured code.
+- I expect iterative development with regular feedback.
+- Please ask for confirmation before making significant architectural changes.
 
-## Stack
+## System Architecture
 
-- **Monorepo tool**: pnpm workspaces
-- **Node.js version**: 24
-- **Package manager**: pnpm
-- **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
+### UI/UX Decisions
+The `SWMM5 Lego Builder` features a distinct LEGO brick aesthetic, employing a vibrant color palette (Red #D01012, Green #70C442/#4B9F4A, Blue #006DB7/#5A93DB, Yellow #F2C717, Orange #FE8A18, Gray #6C6E68, Navy #1B2A34, Off-white #F4F4F4). Key design elements include 3D brick shadows, a green baseplate grid with stud patterns, "instruction booklet" style panels, and specific fonts (Fredoka + Nunito). The interface is fully responsive, adapting to various screen sizes, and includes mobile touch support with long-press functionality for property editing.
+
+### Technical Implementations & Feature Specifications
+
+**SWMM5 Lego Builder (`artifacts/swmm5-lego`)**:
+- **Interactive Grid Editor**: Allows painting surfaces, nodes, and links for stormwater network creation.
+- **Simulation Engines**:
+    - **Quick Sim**: A simplified JavaScript engine for rapid, approximate hydrological feedback (SCS Curve Number, Manning's equation, kinematic wave).
+    - **EPA SWMM5 WASM**: Full EPA SWMM5 v5.2 solver compiled to WebAssembly for accurate, publication-quality dynamic wave routing, including backwater, surcharge, and reverse flow modeling.
+- **Storm Data**: Includes 49+ design storms and 5 continuous multi-day storms.
+- **Visualization & Results**: Real-time animated simulation, result charts (system hydrograph, subcatchment, pipe, node), SWMM Inspector for live data, time-series CSV export, and a downloadable HTML Graph Report.
+- **Model Management**: Export to .INP format, import .INP files, JSON model export/import, undo/redo functionality (30-step history), and localStorage persistence with RLE grid compression.
+- **Advanced Features**: Background map overlay, water quality modeling (pollutant tracking with SWMM5 sections), continuous simulation, custom cell spacing, and model validation with CFL Courant number checks.
+- **Core Dependencies**: React, recharts, Vite.
+- **Architecture**: Modularized structure separating components, utilities (elements, storms, pollutants, units, demos), simulation logic (hydraulics, simWorker, swmmWasm), parsing (`parseRpt`), validation, and persistence.
+
+**API Server (`artifacts/api-server`)**:
+- **Framework**: Express 5 for handling API requests.
+- **Routing**: Routes are organized in `src/routes/` with health checks at `/api/health`.
+- **Validation**: Uses `@workspace/api-zod` for request and response validation.
+- **Persistence**: Integrates with `@workspace/db` for database operations.
+
+**Shared Libraries**:
+- **`lib/db`**: Drizzle ORM with PostgreSQL for database interactions and schema definitions.
+- **`lib/api-spec`**: Manages OpenAPI 3.1 spec and Orval configuration for API code generation.
+- **`lib/api-zod`**: Stores generated Zod schemas for API validation.
+- **`lib/api-client-react`**: Provides generated React Query hooks and a fetch client for API interaction.
+- **`scripts`**: A utility package for various workspace-level scripts.
+
+### System Design Choices
+- **Monorepo**: pnpm workspaces for managing multiple packages, facilitating code sharing and consistent tooling.
+- **TypeScript**: Version 5.9 for strong typing across the entire monorepo.
+- **Build System**: esbuild for CJS bundles, Vite for frontend, and `tsc --build` for typechecking with `emitDeclarationOnly`.
+- **Composite Projects**: Leveraging TypeScript's `composite: true` and project references for efficient cross-package type checking and build order management.
+
+## External Dependencies
+- **Monorepo Tool**: pnpm workspaces
+- **Node.js**: Version 24
+- **TypeScript**: Version 5.9
+- **API Framework**: Express 5
+- **Database**: PostgreSQL
+- **ORM**: Drizzle ORM
 - **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
-
-## Structure
-
-```text
-artifacts-monorepo/
-├── artifacts/              # Deployable applications
-│   ├── api-server/         # Express API server
-│   └── swmm5-lego/         # SWMM5 Lego Builder (React + Vite, frontend-only)
-├── lib/                    # Shared libraries
-│   ├── api-spec/           # OpenAPI spec + Orval codegen config
-│   ├── api-client-react/   # Generated React Query hooks
-│   ├── api-zod/            # Generated Zod schemas from OpenAPI
-│   └── db/                 # Drizzle ORM schema + DB connection
-├── scripts/                # Utility scripts (single workspace package)
-│   └── src/                # Individual .ts scripts, run via `pnpm --filter @workspace/scripts run <script>`
-├── pnpm-workspace.yaml     # pnpm workspace (artifacts/*, lib/*, lib/integrations/*, scripts)
-├── tsconfig.base.json      # Shared TS options (composite, bundler resolution, es2022)
-├── tsconfig.json           # Root TS project references
-└── package.json            # Root package with hoisted devDeps
-```
-
-## Applications
-
-### SWMM5 Lego Builder (`artifacts/swmm5-lego`)
-
-Interactive browser-based stormwater management model builder. Features:
-- Grid-based editor for painting surfaces (grass, roof, road, etc.), nodes (manhole, inlet, outfall), and links (pipe, channel, pump)
-- Full JavaScript SWMM5 simulation engine with SCS Curve Number infiltration, Manning's overland flow, and Manning's pipe flow
-- 49+ design storms from 6 continents (US SCS Types, European, Asian, etc.) plus 5 continuous multi-day storms (2-day to 30-day)
-- Real-time animated simulation with flow visualization on the grid
-- Result charts (system hydrograph, subcatchment, pipe, and node results)
-- SWMM Inspector panel for live element data during simulation
-- Export to .INP format (compatible with EPA SWMM5)
-- Import .INP files from EPA SWMM5
-- 13 built-in demo scenarios (Residential, Parking Lot, Green Infra, Highway, Mixed-Use, School Campus, Industrial, Hillside, Hospital, Dual Outfall, Stadium, Stadium Simple, Minimal Test)
-- Resizable grid (20x20 to 50x50)
-- Model validation with CFL Courant number checks and auto-fix
-- Per-cell property editing via right-click context menu (override CN, % imperv, Manning's n, slope, pipe diameter, node depth)
-- Binary .out file parser extracting full time-series data (node depths/heads/inflows/flooding, link flows/velocities/capacity, system flows/rainfall/outfall, subcatchment runoff) from SWMM5 WASM output
-- Time Series tab in EPA SWMM5 Results showing interactive recharts for system flows, rainfall, node depths, node inflows, link flows, link velocities, subcatchment runoff — all from the binary output
-- Time-series CSV export for all result tabs
-- Downloadable standalone HTML Graph Report with all 4 chart types (system hydrograph, subcatchment runoff, node depths, conduit flows), peak stat cards, rainfall hyetograph, LEGO-themed styling, print-friendly CSS — self-contained file using Canvas API rendering
-- Save/Load to localStorage (auto-save + 5 named slots, schema v2 with extras)
-- JSON model export/import (download/upload full model as JSON file)
-- Undo/Redo support (Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, 30-step history)
-- US/SI unit system toggle (FLOW_UNITS CFS or CMS in INP export)
-- Subcatchment outlet selection via right-click dropdown (override auto-nearest-node)
-- Web Worker simulation (Quick Sim runs off main thread, fallback to main thread on error)
-- Keyboard shortcuts: Ctrl+Z (undo), Ctrl+Shift+Z (redo), Space (toggle paint/erase), Del (erase mode), R (run), Esc (close panels), 1-9 (select surface), Shift+1-5 (select node), Q/W/E (pipe/channel/pump), Arrow keys (grid navigation), Enter (place element)
-- Mobile touch support: single-finger paint/drag on grid with touch-action:none for smooth drawing; long-press (500ms) to open property editor on placed cells
-- Fully responsive layout: three-column desktop (left palette 210px, center grid, right sidebar 280px) stacks vertically on mobile (<768px); dynamic cell sizing scales grid to fit mobile screens; DUAL ENGINES and SHORTCUTS panels hidden on mobile; toolbar buttons, studs, and palette scale down via CSS media queries
-- Background map overlay: upload aerial photos, site plans, or GIS screenshots as a georeferenced background behind the grid with adjustable opacity
-- Water quality modeling: toggle pollutant tracking (TSS, BOD, COD, TN, TP, Zn) with SWMM5 [POLLUTANTS], [LANDUSES], [BUILDUP], [WASHOFF] sections in .INP export; land use derived from surface types
-- Continuous simulation support: 5 multi-day storms (2-day to 30-day) with evaporation and temperature parameters for extended analysis
-- Custom cell spacing: adjust grid cell dimensions (10-1000 ft) for irregular site geometry approximation; scales subcatchment areas, widths, and conduit lengths in .INP export
-- No backend required — entirely frontend
-
-**Visual Theme**: Full LEGO brick aesthetic
-- Color palette: Red #D01012, Green #70C442/#4B9F4A, Blue #006DB7/#5A93DB, Yellow #F2C717, Orange #FE8A18, Gray #6C6E68, Navy #1B2A34, Off-white #F4F4F4
-- 3D brick shadows on grid cells and palette buttons (inset highlights + drop shadow)
-- Green baseplate grid with stud dot radial-gradient pattern
-- White "instruction booklet" style side panels with gray borders and drop shadows
-- LEGO-colored toolbar buttons, red/yellow tutorial overlay, Fredoka + Nunito fonts
-- Inspector, validation, results, and export panels all use light #F4F4F4 backgrounds
-- Grid cell borders: red=error, orange=CFL/validation warning, yellow=custom property override
-
-**Dual Simulation Engines**:
-
-| Engine | Button | Purpose | Tradeoff |
-| --- | --- | --- | --- |
-| **Quick Sim** | 🚀 QUICK SIM | Exploration, learning, instant feedback | Approximate hydraulics, kinematic wave only |
-| **EPA SWMM5 v5.2** | 🔬 EPA SWMM5 | Final results, reporting, validation | Slower startup, but accurate to EPA standard |
-
-1. **Quick Sim** (🚀 QUICK SIM): Simplified animated JS hydrology preview — not actual SWMM.
-   - SCS Curve Number method for infiltration losses
-   - Manning's equation for pipe/overland flow
-   - 15-second routing timestep with real-time flow animation on grid
-   - Kinematic wave only — assumes flow always moves downstream at a fixed speed
-   - Cannot model backwater effects, surcharge, reverse flow, or storage routing
-   - Fast visual feedback engine for iterating on network design
-
-2. **EPA SWMM5 WASM** (🔬 EPA SWMM5): Full EPA SWMM5 v5.2 solver compiled to WebAssembly, runs entirely in-browser.
-   - Dynamic Wave (DynWave) routing — solves the full Saint-Venant equations (continuity + momentum)
-   - Accounts for: backwater effects (downstream conditions affecting upstream), surcharge (pressurized pipe flow), reverse flow, and storage routing (detention basin attenuation)
-   - Produces standard .RPT output with 6-tab results viewer (Summary, Subcatchments, Nodes, Links, Continuity, Raw RPT) including recharts bar charts
-   - Results identical to running EPA SWMM5 on desktop — publication-quality engine
-
-**Why two engines?** The dual-engine approach is pedagogically valuable: users iterate quickly with Quick Sim to understand their network, then run the full EPA engine for definitive results. The difference between the two teaches about model uncertainty and the importance of proper hydraulic routing.
-
-**Key dependencies**: React, recharts (charts), Vite (build)
-
-**Architecture** (modularized):
-- `src/components/SWMM5LegoBuilder.jsx` — Main React component (~2400 lines, inline styles)
-- `src/components/GridCell.jsx` — Extracted GridCell (memo'd) and PalBtn components
-- `src/components/Tutorial.jsx` — Extracted tutorial/onboarding overlay
-- `src/lib/elements.js` — Element definitions (EL, CATS), grid utilities, mutable GRID via getGrid()/setGrid()
-- `src/lib/storms.js` — 49+ design storms with storm category definitions (incl. 5 continuous multi-day)
-- `src/lib/pollutants.js` — Water quality module: 6 pollutants, 10 land uses, buildup/washoff parameters
-- `src/lib/hydraulics.js` — SWMM5 JS engine (buildModel, runSWMM5, Manning's equations, CN infiltration; separates junctions/storage/dividers and conduits/pumps/orifices/weirs)
-- `src/lib/simWorker.js` — Web Worker wrapper for runSWMM5 (off-main-thread simulation)
-- `src/lib/swmmWasm.js` — EPA SWMM5 WASM wrapper (Emscripten module loader, virtual FS I/O, ccall to swmm_run)
-- `src/lib/parseRpt.js` — SWMM5 .RPT output parser (subcatchments, nodes, links, continuity, analysis options)
-- `src/lib/validation.js` — Model validation with CFL checks and auto-fix
-- `src/lib/exportCsv.js` — Time-series CSV export
-- `src/lib/persistence.js` — localStorage save/load (auto-save + named slots, schema v2)
-- `src/lib/exportInp.js` — SWMM5 .INP file export (supports US/SI flow units, storage/pump/orifice/weir sections)
-- `src/lib/importInp.js` — SWMM5 .INP file import with auto grid sizing
-- `src/lib/units.js` — Unit system definitions (US/SI), conversion functions, formatting
-- `src/lib/demos.js` — 13 demo model builders
-- `src/__tests__/` — Vitest unit tests for hydraulics, exportInp, validation, units (43 tests)
-- `src/components/LegoToolbar.css` — 3D LEGO brick toolbar CSS (studs, depth borders, press animations, color variants via data-color)
-- `public/swmm/` — EPA SWMM5 v5.2.4 WASM binaries (js.wasm, js.js compiled from OWA SWMM v5.2.4 source with Emscripten 2.0.10)
-
-## TypeScript & Composite Projects
-
-Every package extends `tsconfig.base.json` which sets `composite: true`. The root `tsconfig.json` lists all packages as project references. This means:
-
-- **Always typecheck from the root** — run `pnpm run typecheck` (which runs `tsc --build --emitDeclarationOnly`). This builds the full dependency graph so that cross-package imports resolve correctly. Running `tsc` inside a single package will fail if its dependencies haven't been built yet.
-- **`emitDeclarationOnly`** — we only emit `.d.ts` files during typecheck; actual JS bundling is handled by esbuild/tsx/vite...etc, not `tsc`.
-- **Project references** — when package A depends on package B, A's `tsconfig.json` must list B in its `references` array. `tsc --build` uses this to determine build order and skip up-to-date packages.
-
-## Root Scripts
-
-- `pnpm run build` — runs `typecheck` first, then recursively runs `build` in all packages that define it
-- `pnpm run typecheck` — runs `tsc --build --emitDeclarationOnly` using project references
-
-## Packages
-
-### `artifacts/api-server` (`@workspace/api-server`)
-
-Express 5 API server. Routes live in `src/routes/` and use `@workspace/api-zod` for request and response validation and `@workspace/db` for persistence.
-
-- Entry: `src/index.ts` — reads `PORT`, starts Express
-- App setup: `src/app.ts` — mounts CORS, JSON/urlencoded parsing, routes at `/api`
-- Routes: `src/routes/index.ts` mounts sub-routers; `src/routes/health.ts` exposes `GET /health` (full path: `/api/health`)
-- Depends on: `@workspace/db`, `@workspace/api-zod`
-- `pnpm --filter @workspace/api-server run dev` — run the dev server
-- `pnpm --filter @workspace/api-server run build` — production esbuild bundle (`dist/index.cjs`)
-- Build bundles an allowlist of deps (express, cors, pg, drizzle-orm, zod, etc.) and externalizes the rest
-
-### `lib/db` (`@workspace/db`)
-
-Database layer using Drizzle ORM with PostgreSQL. Exports a Drizzle client instance and schema models.
-
-- `src/index.ts` — creates a `Pool` + Drizzle instance, exports schema
-- `src/schema/index.ts` — barrel re-export of all models
-- `src/schema/<modelname>.ts` — table definitions with `drizzle-zod` insert schemas (no models definitions exist right now)
-- `drizzle.config.ts` — Drizzle Kit config (requires `DATABASE_URL`, automatically provided by Replit)
-- Exports: `.` (pool, db, schema), `./schema` (schema only)
-
-Production migrations are handled by Replit when publishing. In development, we just use `pnpm --filter @workspace/db run push`, and we fallback to `pnpm --filter @workspace/db run push-force`.
-
-### `lib/api-spec` (`@workspace/api-spec`)
-
-Owns the OpenAPI 3.1 spec (`openapi.yaml`) and the Orval config (`orval.config.ts`). Running codegen produces output into two sibling packages:
-
-1. `lib/api-client-react/src/generated/` — React Query hooks + fetch client
-2. `lib/api-zod/src/generated/` — Zod schemas
-
-Run codegen: `pnpm --filter @workspace/api-spec run codegen`
-
-### `lib/api-zod` (`@workspace/api-zod`)
-
-Generated Zod schemas from the OpenAPI spec (e.g. `HealthCheckResponse`). Used by `api-server` for response validation.
-
-### `lib/api-client-react` (`@workspace/api-client-react`)
-
-Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHealthCheck`, `healthCheck`).
-
-### `scripts` (`@workspace/scripts`)
-
-Utility scripts package. Each script is a `.ts` file in `src/` with a corresponding npm script in `package.json`. Run scripts via `pnpm --filter @workspace/scripts run <script>`. Scripts can import any workspace package (e.g., `@workspace/db`) by adding it as a dependency in `scripts/package.json`.
+- **API Codegen**: Orval (from OpenAPI spec)
+- **Frontend Framework**: React
+- **Build Tools**: Vite, esbuild
+- **Charting Library**: recharts
+- **WASM**: EPA SWMM5 v5.2.4 compiled to WebAssembly (Emscripten)

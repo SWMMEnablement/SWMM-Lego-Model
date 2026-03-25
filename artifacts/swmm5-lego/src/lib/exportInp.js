@@ -46,7 +46,7 @@ export function exportINP(grid, storm, cellProps, options = {}) {
   } else {
     ln("REPORT_STEP          00:05:00"); ln("WET_STEP             00:01:00"); ln("DRY_STEP             01:00:00");
   }
-  ln("ROUTING_STEP         0:00:15"); ln("VARIABLE_STEP        0.75"); ln(); 
+  ln("ROUTING_STEP         0:00:15"); ln("VARIABLE_STEP        0.75"); ln();
 
   if (isContinuous) {
     ln("[EVAPORATION]");
@@ -102,7 +102,12 @@ export function exportINP(grid, storm, cellProps, options = {}) {
     ln("[STORAGE]");
     ln(";;Name           Elev       MaxDepth   InitDepth  Shape      Curve Name/Params            Ponded  Evap  Seep");
     model.storage.forEach(s => {
-      ln(`${s.id.padEnd(17)}${s.invert.toFixed(2).padStart(10)} ${(s.maxDepth||10).toString().padStart(10)} ${"0".padStart(10)} FUNCTIONAL 1000       0          0          ${"0".padStart(8)} ${"0".padStart(5)} ${"0".padStart(5)}`);
+      const cp = cellProps || {};
+      const ov = cp[`${s.r}-${s.c}`] || {};
+      const surfArea = ov.surfArea || 1000;
+      const coeff = ov.storCoeff || 0;
+      const expon = ov.storExpon || 0;
+      ln(`${s.id.padEnd(17)}${s.invert.toFixed(2).padStart(10)} ${(s.maxDepth||10).toString().padStart(10)} ${"0".padStart(10)} FUNCTIONAL ${surfArea.toString().padStart(9)} ${coeff.toString().padStart(10)} ${expon.toString().padStart(10)} ${"0".padStart(8)} ${"0".padStart(5)} ${"0".padStart(5)}`);
     }); ln();
   }
 
@@ -124,7 +129,13 @@ export function exportINP(grid, storm, cellProps, options = {}) {
     ln("[PUMPS]");
     ln(";;Name           From Node        To Node          Pump Curve       Status   Startup  Shutoff");
     model.pumps.forEach(p => {
-      ln(`${p.id.padEnd(17)}${p.from.id.padEnd(17)}${p.to.id.padEnd(17)}*                ON       ${"0".padStart(8)} ${"0".padStart(8)}`);
+      const cp = cellProps || {};
+      const firstPipe = p.pipes[0];
+      const ov = firstPipe ? (cp[`${firstPipe.r}-${firstPipe.c}`] || {}) : {};
+      const curveName = ov.pumpCurve || `PC_${p.id}`;
+      const startupDepth = ov.pumpStartup || 0;
+      const shutoffDepth = ov.pumpShutoff || 0;
+      ln(`${p.id.padEnd(17)}${p.from.id.padEnd(17)}${p.to.id.padEnd(17)}${curveName.padEnd(17)}ON       ${startupDepth.toString().padStart(8)} ${shutoffDepth.toString().padStart(8)}`);
     }); ln();
   }
 
@@ -132,7 +143,13 @@ export function exportINP(grid, storm, cellProps, options = {}) {
     ln("[ORIFICES]");
     ln(";;Name           From Node        To Node          Type         Offset     Qcoeff     Gated    CloseTime");
     model.orifices.forEach(o => {
-      ln(`${o.id.padEnd(17)}${o.from.id.padEnd(17)}${o.to.id.padEnd(17)}SIDE         ${"0".padStart(10)} ${(0.65).toFixed(4).padStart(10)} NO       ${"0".padStart(10)}`);
+      const cp = cellProps || {};
+      const firstPipe = o.pipes[0];
+      const ov = firstPipe ? (cp[`${firstPipe.r}-${firstPipe.c}`] || {}) : {};
+      const orificeType = ov.orificeType || "SIDE";
+      const offset = ov.orificeOffset || 0;
+      const Cd = ov.orificeCoeff || 0.65;
+      ln(`${o.id.padEnd(17)}${o.from.id.padEnd(17)}${o.to.id.padEnd(17)}${orificeType.padEnd(13)}${offset.toFixed(2).padStart(10)} ${Cd.toFixed(4).padStart(10)} NO       ${"0".padStart(10)}`);
     }); ln();
   }
 
@@ -140,12 +157,34 @@ export function exportINP(grid, storm, cellProps, options = {}) {
     ln("[WEIRS]");
     ln(";;Name           From Node        To Node          Type         CrestHt    Qcoeff     Gated    EndCon   EndCoeff   Surcharge");
     model.weirs.forEach(w => {
-      ln(`${w.id.padEnd(17)}${w.from.id.padEnd(17)}${w.to.id.padEnd(17)}TRANSVERSE   ${"0".padStart(10)} ${(3.33).toFixed(2).padStart(10)} NO       ${"0".padStart(8)} ${"0".padStart(10)} YES`);
+      const cp = cellProps || {};
+      const firstPipe = w.pipes[0];
+      const ov = firstPipe ? (cp[`${firstPipe.r}-${firstPipe.c}`] || {}) : {};
+      const weirType = ov.weirType || "TRANSVERSE";
+      const crestHt = ov.weirCrest || 0;
+      const Cd = ov.weirCoeff || 3.33;
+      ln(`${w.id.padEnd(17)}${w.from.id.padEnd(17)}${w.to.id.padEnd(17)}${weirType.padEnd(13)}${crestHt.toFixed(2).padStart(10)} ${Cd.toFixed(2).padStart(10)} NO       ${"0".padStart(8)} ${"0".padStart(10)} YES`);
     }); ln();
   }
 
   ln("[XSECTIONS]");
-  model.conduits.forEach(cd => { ln(`${cd.id.padEnd(17)}CIRCULAR     ${cd.diam.toFixed(1).padStart(16)} ${"0".padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"1".padStart(10)}`); });
+  model.conduits.forEach(cd => {
+    const cp = cellProps || {};
+    const firstPipe = cd.pipes[0];
+    const ov = firstPipe ? (cp[`${firstPipe.r}-${firstPipe.c}`] || {}) : {};
+    const shape = ov.xsecShape || "CIRCULAR";
+    if (shape === "TRAPEZOIDAL") {
+      const botWidth = ov.xsecWidth || cd.diam;
+      const sideSlope = ov.xsecSideSlope || 2;
+      ln(`${cd.id.padEnd(17)}TRAPEZOIDAL  ${cd.diam.toFixed(1).padStart(16)} ${botWidth.toFixed(1).padStart(10)} ${sideSlope.toFixed(1).padStart(10)} ${sideSlope.toFixed(1).padStart(10)} ${"1".padStart(10)}`);
+    } else if (shape === "RECT_OPEN") {
+      ln(`${cd.id.padEnd(17)}RECT_OPEN    ${cd.diam.toFixed(1).padStart(16)} ${(ov.xsecWidth || cd.diam).toFixed(1).padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"1".padStart(10)}`);
+    } else if (shape === "ARCH") {
+      ln(`${cd.id.padEnd(17)}ARCH         ${cd.diam.toFixed(1).padStart(16)} ${(cd.diam * 1.5).toFixed(1).padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"1".padStart(10)}`);
+    } else {
+      ln(`${cd.id.padEnd(17)}CIRCULAR     ${cd.diam.toFixed(1).padStart(16)} ${"0".padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"1".padStart(10)}`);
+    }
+  });
   if (model.orifices) {
     model.orifices.forEach(o => { ln(`${o.id.padEnd(17)}CIRCULAR     ${o.diam.toFixed(1).padStart(16)} ${"0".padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"1".padStart(10)}`); });
   }
@@ -153,6 +192,34 @@ export function exportINP(grid, storm, cellProps, options = {}) {
     model.weirs.forEach(w => { ln(`${w.id.padEnd(17)}RECT_OPEN    ${w.diam.toFixed(1).padStart(16)} ${(w.diam * 0.5).toFixed(1).padStart(10)} ${"0".padStart(10)} ${"0".padStart(10)} ${"1".padStart(10)}`); });
   }
   ln();
+
+  ln("[LOSSES]");
+  ln(";;Link           Kentry     Kexit      Kavg       Flap Gate  Seepage");
+  model.conduits.forEach(cd => {
+    const cp = cellProps || {};
+    const firstPipe = cd.pipes[0];
+    const ov = firstPipe ? (cp[`${firstPipe.r}-${firstPipe.c}`] || {}) : {};
+    const kEntry = ov.kEntry || 0;
+    const kExit = ov.kExit || 0;
+    const kAvg = ov.kAvg || 0;
+    const flapGate = ov.flapGate ? "YES" : "NO";
+    ln(`${cd.id.padEnd(17)}${kEntry.toFixed(2).padStart(10)} ${kExit.toFixed(2).padStart(10)} ${kAvg.toFixed(2).padStart(10)} ${flapGate.padStart(10)} ${"0".padStart(10)}`);
+  }); ln();
+
+  if (model.pumps && model.pumps.length > 0) {
+    ln("[CURVES]");
+    ln(";;Name           Type       X-Value    Y-Value");
+    model.pumps.forEach(p => {
+      const cp = cellProps || {};
+      const firstPipe = p.pipes[0];
+      const ov = firstPipe ? (cp[`${firstPipe.r}-${firstPipe.c}`] || {}) : {};
+      const curveName = ov.pumpCurve || `PC_${p.id}`;
+      const maxFlow = ov.pumpMaxFlow || (p.diam * p.diam * 2);
+      const maxHead = ov.pumpMaxHead || 10;
+      ln(`${curveName.padEnd(17)}PUMP3      ${(0).toFixed(1).padStart(10)} ${maxFlow.toFixed(2).padStart(10)}`);
+      ln(`${curveName.padEnd(17)}           ${maxHead.toFixed(1).padStart(10)} ${"0.00".padStart(10)}`);
+    }); ln();
+  }
 
   if (wq.enabled) {
     const selPolls = POLLUTANTS.filter(p => wq.selectedPollutants.includes(p.id));
@@ -217,8 +284,38 @@ export function exportINP(grid, storm, cellProps, options = {}) {
   ln("[TIMESERIES]"); ln(";;Name           Time       Value");
   storm.rain.forEach((v, i) => { ln(`TS_Rain          ${(i * rainIntvMin)}          ${v.toFixed(2)}`); }); ln();
 
+  ln("[TAGS]");
+  model.subcatchments.forEach(sc => {
+    ln(`Subcatch     ${sc.id.padEnd(17)}LegoBuilder`);
+  });
+  model.allNodes.forEach(n => {
+    ln(`Node         ${n.id.padEnd(17)}LegoBuilder`);
+  });
+  model.allConduitLike.forEach(cd => {
+    ln(`Link         ${cd.id.padEnd(17)}LegoBuilder`);
+  });
+  ln();
+
+  ln("[MAP]");
+  const mapMinX = 0;
+  const mapMinY = 0;
+  const mapMaxX = (GRID - 1) * cellSpc;
+  const mapMaxY = (GRID - 1) * cellSpc;
+  ln(`DIMENSIONS ${mapMinX.toFixed(3)} ${mapMinY.toFixed(3)} ${mapMaxX.toFixed(3)} ${mapMaxY.toFixed(3)}`);
+  ln("Units      Feet");
+  ln();
+
   ln("[COORDINATES]");
   model.allNodes.forEach(n => { ln(`${n.id.padEnd(17)}${(n.c*cellSpc).toFixed(3).padStart(18)} ${((GRID-1-n.r)*cellSpc).toFixed(3).padStart(18)}`); }); ln();
+
+  ln("[VERTICES]");
+  model.allConduitLike.forEach(cd => {
+    if (cd.pipes.length > 2) {
+      cd.pipes.slice(1, -1).forEach(p => {
+        ln(`${cd.id.padEnd(17)}${(p.c * cellSpc).toFixed(3).padStart(18)} ${((GRID - 1 - p.r) * cellSpc).toFixed(3).padStart(18)}`);
+      });
+    }
+  }); ln();
 
   ln("[REPORT]"); ln("SUBCATCHMENTS ALL"); ln("NODES ALL"); ln("LINKS ALL"); ln();
   return inp;

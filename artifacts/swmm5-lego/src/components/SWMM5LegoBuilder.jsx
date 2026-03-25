@@ -6,7 +6,7 @@ import { STORM_CATS, STORMS } from "../lib/storms.js";
 import { runSWMM5 } from "../lib/hydraulics.js";
 import { validateModel, autoFix } from "../lib/validation.js";
 import { exportResultsCsv } from "../lib/exportCsv.js";
-import { saveToLocalStorage, loadFromLocalStorage, getSaveSlots, saveToSlot, deleteSlot, exportModelJSON, importModelJSON } from "../lib/persistence.js";
+import { saveToLocalStorage, loadFromLocalStorage, getSaveSlots, saveToSlot, deleteSlot, exportModelJSON, importModelJSON, getStorageUsage } from "../lib/persistence.js";
 import { exportINP } from "../lib/exportInp.js";
 import { generateHtmlReport } from "../lib/exportHtmlReport.js";
 import { importINP } from "../lib/importInp.js";
@@ -20,6 +20,40 @@ import { GridCell, PalBtn } from "./GridCell.jsx";
 import Tutorial from "./Tutorial.jsx";
 import "./LegoToolbar.css";
 
+function ToastBar({ toasts, onDismiss }) {
+  if (!toasts || toasts.length === 0) return null;
+  return (
+    <div style={{ position: "fixed", top: 12, right: 12, zIndex: 20000, display: "flex", flexDirection: "column", gap: 6, maxWidth: 360 }}>
+      {toasts.map(t => (
+        <div key={t.id} onClick={() => onDismiss(t.id)} style={{
+          padding: "8px 14px", borderRadius: 6, cursor: "pointer",
+          fontFamily: "'Fredoka', sans-serif", fontSize: 11, fontWeight: 700,
+          color: "#F4F4F4", lineHeight: 1.4,
+          background: t.type === "error" ? "#D01012" : t.type === "warning" ? "#FE8A18" : t.type === "success" ? "#4B9F4A" : "#006DB7",
+          border: `2px solid ${t.type === "error" ? "#A00C0E" : t.type === "warning" ? "#CE6A08" : t.type === "success" ? "#3A8A3A" : "#004D87"}`,
+          boxShadow: "4px 4px 0 rgba(0,0,0,0.4)",
+          animation: "fadeInRight 0.3s ease",
+        }}>
+          {t.type === "error" ? "🚫 " : t.type === "warning" ? "⚠️ " : t.type === "success" ? "✅ " : "ℹ️ "}{t.message}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function useToasts() {
+  const [toasts, setToasts] = useState([]);
+  const idRef = useRef(0);
+  const addToast = useCallback((message, type = "info", duration = 5000) => {
+    const id = ++idRef.current;
+    setToasts(prev => [...prev.slice(-4), { id, message, type }]);
+    if (duration > 0) setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+    return id;
+  }, []);
+  const dismissToast = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
+  return { toasts, addToast, dismissToast };
+}
+
 function useIsMobile(breakpoint = 768) {
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= breakpoint);
   useEffect(() => {
@@ -32,6 +66,8 @@ function useIsMobile(breakpoint = 768) {
 
 export default function SWMM5LegoBuilder() {
   const isMobile = useIsMobile();
+  const { toasts, addToast, dismissToast } = useToasts();
+  const [simLoading, setSimLoading] = useState(false);
   const cellSize = isMobile ? Math.max(14, Math.floor((window.innerWidth - 20) / 20)) : CELL;
   const [gridSize, setGridSize] = useState(20);
   const [grid, setGrid] = useState(() => { setGridGlobal(20); return emptyGrid(20); });
@@ -198,23 +234,31 @@ export default function SWMM5LegoBuilder() {
   const longPressRef = useRef(null);
   const longPressMovedRef = useRef(false);
 
+  const touchPaintedRef = useRef(false);
   const handleTouchStart = useCallback((e) => {
     if (e.touches.length !== 1) return;
     const cell = touchToCell(e.touches[0]);
     longPressMovedRef.current = false;
+    touchPaintedRef.current = false;
     if (cell) {
       const touch = e.touches[0];
+      const existingEl = grid[cell.r]?.[cell.c];
       longPressRef.current = setTimeout(() => {
-        const elKey = grid[cell.r]?.[cell.c];
-        if (elKey && EL[elKey] && !longPressMovedRef.current) {
-          setCtxMenu({ r: cell.r, c: cell.c, x: touch.clientX, y: touch.clientY });
-          setPainting(false);
+        if (!longPressMovedRef.current && !touchPaintedRef.current) {
+          const elKey = grid[cell.r]?.[cell.c];
+          if (elKey && EL[elKey]) {
+            setCtxMenu({ r: cell.r, c: cell.c, x: touch.clientX, y: touch.clientY });
+            setPainting(false);
+          }
         }
         longPressRef.current = null;
-      }, 500);
-      save(); place(cell.r, cell.c); setInspCell(cell); setPainting(true);
+      }, 400);
+      if (!existingEl || erasing) {
+        save(); place(cell.r, cell.c); touchPaintedRef.current = true;
+      }
+      setInspCell(cell); setPainting(true);
     }
-  }, [touchToCell, save, place, grid]);
+  }, [touchToCell, save, place, grid, erasing]);
 
   const handleTouchMove = useCallback((e) => {
     e.preventDefault();
@@ -257,6 +301,7 @@ export default function SWMM5LegoBuilder() {
         setGridSize(result.gridSize);
       }
       setGrid(result.grid);
+      setCellProps(result.cellProps || {});
       doReset(); setValidation(null);
       const log = [];
       log.push(`📂 Imported: ${file.name}`);
@@ -294,11 +339,15 @@ export default function SWMM5LegoBuilder() {
           log.push(`   Grid: ${sc.cellsPlaced} cells as ${sc.surfType}`);
         });
       }
+      if (result.counts?.nCellPropsImported > 0) {
+        log.push(`🔧 ${result.counts.nCellPropsImported} cell properties imported (diameters, depths, losses)`);
+      }
       if (result.warnings.length > 0) {
         log.push(`─── WARNINGS ───`);
         result.warnings.forEach(w => log.push(`⚠️ ${w}`));
       }
       setFixLog(log);
+      addToast(`Imported ${file.name} — ${result.counts?.nJunctions || 0} junctions, ${result.counts?.nConduits || 0} conduits`, "success");
     };
     reader.readAsText(file);
     e.target.value = "";
@@ -338,8 +387,10 @@ export default function SWMM5LegoBuilder() {
   const doRun = () => {
     const v = validateModel(grid);
     setValidation(v);
-    if (v.errors.length > 0) return;
+    if (v.errors.length > 0) { addToast(`${v.errors.length} validation error(s) — fix before simulating`, "error"); return; }
+    if (simLoading) return;
     if (workerRef.current) workerRef.current.terminate();
+    setSimLoading(true);
     const worker = new Worker(
       new URL('../lib/simWorker.js', import.meta.url),
       { type: 'module' }
@@ -353,22 +404,32 @@ export default function SWMM5LegoBuilder() {
           setSimResult(e.data.data);
           setSimStep(0);
           setIsRunning(true);
+          addToast("Quick Sim complete — animating results", "success", 3000);
+        } else {
+          addToast("Simulation returned no results — check model", "warning");
         }
       } else if (e.data.type === 'error') {
-        console.error('Sim worker error:', e.data.message);
+        addToast(`Simulation error: ${e.data.message}`, "error");
       }
+      setSimLoading(false);
       worker.terminate();
       workerRef.current = null;
     };
     worker.onerror = (err) => {
-      console.error('Worker error, falling back to main thread:', err);
+      addToast("Worker unavailable — running on main thread", "warning", 3000);
       worker.terminate();
       workerRef.current = null;
-      const result = runSWMM5(grid, STORMS[stormIdx], cellProps);
-      if (!result) return;
-      setSimResult(result);
-      setSimStep(0);
-      setIsRunning(true);
+      try {
+        const result = runSWMM5(grid, STORMS[stormIdx], cellProps);
+        if (!result) { addToast("Simulation produced no results", "warning"); setSimLoading(false); return; }
+        setSimResult(result);
+        setSimStep(0);
+        setIsRunning(true);
+        addToast("Quick Sim complete (main thread fallback)", "success", 3000);
+      } catch (e) {
+        addToast(`Simulation failed: ${e.message}`, "error");
+      }
+      setSimLoading(false);
     };
     worker.postMessage({ grid, storm: STORMS[stormIdx], cellProps, gridSize });
   };
@@ -379,19 +440,22 @@ export default function SWMM5LegoBuilder() {
   const doExport = () => {
     const v = validateModel(grid);
     setValidation(v);
-    if (v.errors.length > 0) return;
+    if (v.errors.length > 0) { addToast("Fix validation errors before exporting", "error"); return; }
     setInpText(exportINP(grid, STORMS[stormIdx], cellProps, {
       waterQuality: wqConfig, cellSpacing, evapRate, unitSystem,
     }));
     setShowInp(true);
+    addToast("INP file generated", "success", 2000);
   };
 
   const doRunWasm = async () => {
     const v = validateModel(grid);
     setValidation(v);
-    if (v.errors.length > 0) return;
+    if (v.errors.length > 0) { addToast("Fix validation errors before running SWMM5", "error"); return; }
+    if (wasmLoading) return;
     setWasmLoading(true);
     setWasmRpt(null); setWasmParsed(null); setWasmBinaryResults(null);
+    addToast("Running EPA SWMM5 WASM solver...", "info", 3000);
     try {
       const inp = exportINP(grid, STORMS[stormIdx], cellProps, {
         waterQuality: wqConfig, cellSpacing, evapRate, unitSystem,
@@ -407,16 +471,19 @@ export default function SWMM5LegoBuilder() {
         try {
           const binResults = parseOutBinary(outBinary);
           setWasmBinaryResults(binResults);
-          console.log(`Binary .out parsed: ${binResults.nPeriods} periods, ${binResults.nodeResults.length} nodes, ${binResults.linkResults.length} links, ${binResults.subcatchResults.length} subcatchments`);
         } catch (be) {
-          console.warn('Binary .out parse error:', be.message);
+          addToast(`Binary output parse warning: ${be.message}`, "warning");
         }
-      } else {
-        console.warn('No binary .out file produced by SWMM5 WASM');
       }
       setShowRpt(true);
       setRptTab("summary");
+      if (parsed.errors.length > 0) {
+        addToast(`SWMM5 completed with ${parsed.errors.length} error(s)`, "warning");
+      } else {
+        addToast("EPA SWMM5 simulation complete", "success", 3000);
+      }
     } catch (e) {
+      addToast(`SWMM5 WASM error: ${e.message}`, "error");
       setWasmRpt(`Error: ${e.message}`);
       setWasmParsed({ errors: [e.message], warnings: [], subcatchRunoff: [], nodeDepth: [], nodeInflow: [], nodeFlooding: [], outfallLoading: [], linkFlow: [], analysisOptions: {}, runoffQuantity: {}, routingSummary: {}, raw: '' });
       setShowRpt(true);
@@ -452,6 +519,9 @@ export default function SWMM5LegoBuilder() {
       display: "flex", flexDirection: "column", alignItems: "center",
     }}>
       <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700;800&family=Nunito:wght@400;700;800;900&display=swap" rel="stylesheet" />
+      <style>{`@keyframes fadeInRight { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }`}</style>
+
+      <ToastBar toasts={toasts} onDismiss={dismissToast} />
 
       {showTutorial && <Tutorial onClose={() => setShowTutorial(false)} />}
 
@@ -632,17 +702,17 @@ export default function SWMM5LegoBuilder() {
                 { l: "✅ VALIDATE", fn: () => setValidation(validateModel(grid)), color: "green", tip: "Check model for errors" },
                 { l: "🔧 FIX", fn: doFix, color: "yellow", tip: "Auto-fix validation errors" },
                 { sep: true },
-                { l: "🚀 QUICK SIM", fn: doRun, color: "blue", tip: "Run animated JS hydrology sim (SCS-CN + Manning's) [R]" },
+                { l: simLoading ? "⏳ SIMULATING..." : "🚀 QUICK SIM", fn: doRun, color: "blue", tip: "Run animated JS hydrology sim (SCS-CN + Manning's) [R]", disabled: simLoading || wasmLoading },
                 ...(isRunning ? [{ l: "⏸ STOP", fn: doStop, color: "red", tip: "Stop the running simulation" }] : []),
                 ...(simResult && !isRunning ? [{ l: "🔄 RESET", fn: doReset, color: "gray", tip: "Clear simulation results and reset the grid display" }] : []),
                 { l: "💾 SAVE/LOAD", fn: () => { setSaveSlots(getSaveSlots()); setShowSavePanel(true); }, color: "green", tip: "Save/load models to browser storage (auto-save + 5 named slots)" },
                 { sep: true },
-                { l: wasmLoading ? "⏳ RUNNING..." : "🔬 EPA SWMM5", fn: doRunWasm, color: "red", tip: "Run full EPA SWMM5 solver (WASM) with Dynamic Wave routing and detailed RPT output" },
+                { l: wasmLoading ? "⏳ RUNNING..." : "🔬 EPA SWMM5", fn: doRunWasm, color: "red", tip: "Run full EPA SWMM5 solver (WASM) with Dynamic Wave routing and detailed RPT output", disabled: wasmLoading || simLoading },
                 { l: "📦 EXPORT", fn: doExport, color: "orange", tip: "Export model as EPA SWMM5 .INP file (compatible with desktop SWMM5)" },
                 { l: "📂 IMPORT", fn: () => fileRef.current?.click(), color: "blue", tip: "Import an EPA SWMM5 .INP file from your computer" },
               ].map((b, i) => b.sep
                 ? <span key={i} className="separator" />
-                : <button key={i} className="lego-btn" data-color={b.color} onClick={b.fn} title={b.tip}>{b.l}</button>
+                : <button key={i} className="lego-btn" data-color={b.color} onClick={b.disabled ? undefined : b.fn} title={b.tip} disabled={b.disabled} style={b.disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}>{b.l}</button>
               )}
               <span className="separator" />
               <span className="lego-label">Grid:</span>
@@ -2344,7 +2414,9 @@ export default function SWMM5LegoBuilder() {
             />
             <button onClick={() => {
               if (!saveName.trim()) return;
-              saveToSlot(saveName.trim(), grid, gridSize, stormIdx, cellProps, { wqConfig, cellSpacing, evapRate, unitSystem });
+              const res = saveToSlot(saveName.trim(), grid, gridSize, stormIdx, cellProps, { wqConfig, cellSpacing, evapRate, unitSystem });
+              if (res && !res.success) { addToast(res.message || "Save failed", "error"); }
+              else { addToast(`Saved to slot "${saveName.trim()}"`, "success", 2000); }
               setSaveSlots(getSaveSlots());
               setSaveName("");
             }} style={{

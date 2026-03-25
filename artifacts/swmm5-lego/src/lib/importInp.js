@@ -26,10 +26,11 @@ export function importINP(text, requestedSize) {
   setGrid(useSize);
   const GRID = useSize;
   const grid = emptyGrid(useSize);
+  const cellProps = {};
 
   const allCoords = Object.values(coords);
-  if (allCoords.length === 0) return { grid, gridSize: useSize, warnings: ["No [COORDINATES] — cannot place nodes."], subcatchInfo: [], counts: { nJunctions: 0, nOutfalls: 0, nConduits: 0, nSubcatch: 0 } };
-  
+  if (allCoords.length === 0) return { grid, gridSize: useSize, cellProps, warnings: ["No [COORDINATES] — cannot place nodes."], subcatchInfo: [], counts: { nJunctions: 0, nOutfalls: 0, nConduits: 0, nSubcatch: 0 } };
+
   const minX = Math.min(...allCoords.map(c => c.x)), maxX = Math.max(...allCoords.map(c => c.x));
   const minY = Math.min(...allCoords.map(c => c.y)), maxY = Math.max(...allCoords.map(c => c.y));
   const rangeX = maxX - minX || 1, rangeY = maxY - minY || 1;
@@ -48,6 +49,7 @@ export function importINP(text, requestedSize) {
   const nodePositions = {};
   const nodeTypes = {};
 
+  const junctionData = {};
   (sections["[JUNCTIONS]"] || []).forEach(line => {
     const parts = line.trim().split(/\s+/);
     if (parts.length < 2) return;
@@ -58,6 +60,17 @@ export function importINP(text, requestedSize) {
     grid[pos.r][pos.c] = isInlet ? "inlet" : "manhole";
     nodePositions[id] = pos;
     nodeTypes[id] = isInlet ? "inlet" : "manhole";
+    junctionData[id] = {
+      elevation: parseFloat(parts[1]) || 0,
+      maxDepth: parseFloat(parts[2]) || 0,
+      initDepth: parseFloat(parts[3]) || 0,
+      surDepth: parseFloat(parts[4]) || 0,
+      aponded: parseFloat(parts[5]) || 0,
+    };
+    const jd = junctionData[id];
+    if (jd.maxDepth > 0 && jd.maxDepth !== 6) {
+      cellProps[`${pos.r}-${pos.c}`] = { ...cellProps[`${pos.r}-${pos.c}`], maxD: jd.maxDepth };
+    }
   });
 
   (sections["[OUTFALLS]"] || []).forEach(line => {
@@ -80,6 +93,10 @@ export function importINP(text, requestedSize) {
     grid[pos.r][pos.c] = "storage";
     nodePositions[id] = pos;
     nodeTypes[id] = "storage";
+    const maxD = parseFloat(parts[2]) || 10;
+    if (maxD !== 10) {
+      cellProps[`${pos.r}-${pos.c}`] = { ...cellProps[`${pos.r}-${pos.c}`], maxD };
+    }
   });
 
   (sections["[DIVIDERS]"] || []).forEach(line => {
@@ -93,35 +110,79 @@ export function importINP(text, requestedSize) {
     nodeTypes[id] = "divider";
   });
 
+  const xsections = {};
+  (sections["[XSECTIONS]"] || []).forEach(line => {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length >= 3) {
+      xsections[parts[0]] = {
+        shape: parts[1].toUpperCase(),
+        dim1: parseFloat(parts[2]) || 0,
+        dim2: parseFloat(parts[3]) || 0,
+      };
+    }
+  });
+
+  const losses = {};
+  (sections["[LOSSES]"] || []).forEach(line => {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length >= 4) {
+      losses[parts[0]] = {
+        kEntry: parseFloat(parts[1]) || 0,
+        kExit: parseFloat(parts[2]) || 0,
+        kAvg: parseFloat(parts[3]) || 0,
+        flapGate: parts[4]?.toUpperCase() === "YES",
+      };
+    }
+  });
+
   function tracePath(fromPos, toPos, linkType) {
     let { r: r1, c: c1 } = fromPos, { r: r2, c: c2 } = toPos;
     const dr = r2 > r1 ? 1 : r2 < r1 ? -1 : 0;
     const dc = c2 > c1 ? 1 : c2 < c1 ? -1 : 0;
     let cr = r1, cc = c1;
+    const placed = [];
     while (cc !== c2) {
       cc += dc;
       if (cc === c2 && cr === r2) break;
-      if (!grid[cr][cc]) grid[cr][cc] = linkType;
+      if (!grid[cr][cc]) { grid[cr][cc] = linkType; placed.push({ r: cr, c: cc }); }
     }
     while (cr !== r2) {
       cr += dr;
       if (cr === r2 && cc === c2) break;
-      if (!grid[cr][cc]) grid[cr][cc] = linkType;
+      if (!grid[cr][cc]) { grid[cr][cc] = linkType; placed.push({ r: cr, c: cc }); }
     }
+    return placed;
   }
 
   (sections["[CONDUITS]"] || []).forEach(line => {
     const parts = line.trim().split(/\s+/);
     if (parts.length < 3) return;
+    const linkId = parts[0];
     const fromPos = nodePositions[parts[1]], toPos = nodePositions[parts[2]];
-    if (!fromPos || !toPos) { warnings.push(`Conduit ${parts[0]}: missing node position`); return; }
-    tracePath(fromPos, toPos, "pipe");
-  });
+    if (!fromPos || !toPos) { warnings.push(`Conduit ${linkId}: missing node position`); return; }
+    const placed = tracePath(fromPos, toPos, "pipe");
 
-  const xsections = {};
-  (sections["[XSECTIONS]"] || []).forEach(line => {
-    const parts = line.trim().split(/\s+/);
-    if (parts.length >= 2) xsections[parts[0]] = parts[1].toUpperCase();
+    const xs = xsections[linkId];
+    const loss = losses[linkId];
+    const mann = parseFloat(parts[4]) || 0.013;
+
+    if (placed.length > 0) {
+      const firstKey = `${placed[0].r}-${placed[0].c}`;
+      const props = {};
+      if (xs && xs.dim1 > 0 && xs.dim1 !== 1.5) props.diam = xs.dim1;
+      if (mann > 0 && mann !== 0.013) props.mann = mann;
+      if (xs && xs.shape !== "CIRCULAR") props.xsecShape = xs.shape;
+      if (xs && xs.shape === "TRAPEZOIDAL" && xs.dim2 > 0) props.xsecWidth = xs.dim2;
+      if (loss) {
+        if (loss.kEntry > 0) props.kEntry = loss.kEntry;
+        if (loss.kExit > 0) props.kExit = loss.kExit;
+        if (loss.kAvg > 0) props.kAvg = loss.kAvg;
+        if (loss.flapGate) props.flapGate = true;
+      }
+      if (Object.keys(props).length > 0) {
+        cellProps[firstKey] = { ...cellProps[firstKey], ...props };
+      }
+    }
   });
 
   (sections["[PUMPS]"] || []).forEach(line => {
@@ -225,6 +286,7 @@ export function importINP(text, requestedSize) {
     else if (sc.pctImperv >= 5) surfType = "lid_pond";
 
     let cellsPlaced = 0;
+    const placedCells = [];
     const poly = polygons[sc.id];
     if (poly && poly.length >= 3) {
       const gridPts = poly.map(p => ({
@@ -237,14 +299,30 @@ export function importINP(text, requestedSize) {
       const maxC = Math.min(GRID-1, Math.max(...gridPts.map(p => p.c)));
       for (let r = minR; r <= maxR; r++)
         for (let c = minC; c <= maxC; c++)
-          if (!grid[r][c]) { grid[r][c] = surfType; cellsPlaced++; }
+          if (!grid[r][c]) { grid[r][c] = surfType; cellsPlaced++; placedCells.push({ r, c }); }
     } else {
       const pos = nodePositions[sc.outlet];
       if (pos) {
         for (const [dr, dc] of [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]]) {
           const nr = pos.r + dr, nc = pos.c + dc;
-          if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID && !grid[nr][nc]) { grid[nr][nc] = surfType; cellsPlaced++; }
+          if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID && !grid[nr][nc]) { grid[nr][nc] = surfType; cellsPlaced++; placedCells.push({ r: nr, c: nc }); }
         }
+      }
+    }
+
+    if (placedCells.length > 0 && sc.cn > 0) {
+      const firstCell = placedCells[0];
+      const key = `${firstCell.r}-${firstCell.c}`;
+      const surfProps = {};
+      const defaultEl = EL[surfType];
+      if (Math.abs(sc.cn - defaultEl.cn) > 1) surfProps.cn = sc.cn;
+      if (Math.abs(sc.pctImperv - defaultEl.pI) > 1) surfProps.pI = sc.pctImperv;
+      if (Math.abs(sc.nI - defaultEl.nI) > 0.001) surfProps.nI = sc.nI;
+      if (Math.abs(sc.nP - defaultEl.nP) > 0.001) surfProps.nP = sc.nP;
+      if (Math.abs(sc.sI - defaultEl.sI) > 0.001) surfProps.sI = sc.sI;
+      if (Math.abs(sc.sP - defaultEl.sP) > 0.001) surfProps.sP = sc.sP;
+      if (Object.keys(surfProps).length > 0) {
+        cellProps[key] = { ...cellProps[key], ...surfProps };
       }
     }
 
@@ -273,8 +351,9 @@ export function importINP(text, requestedSize) {
   const nOrifices = (sections["[ORIFICES]"] || []).length;
   const nWeirs = (sections["[WEIRS]"] || []).length;
   const nSubcatch = Object.keys(scData).length;
+  const nCellPropsImported = Object.keys(cellProps).length;
 
-  return { grid, gridSize: useSize, warnings, subcatchInfo, options, counts: {
-    nJunctions, nOutfalls, nStorage, nDividers, nConduits, nPumps, nOrifices, nWeirs, nSubcatch,
+  return { grid, gridSize: useSize, cellProps, warnings, subcatchInfo, options, counts: {
+    nJunctions, nOutfalls, nStorage, nDividers, nConduits, nPumps, nOrifices, nWeirs, nSubcatch, nCellPropsImported,
   }};
 }
